@@ -23,7 +23,7 @@ import {
 } from "../auth.js";
 import { env } from "../env.js";
 import { ensureEtherealPool } from "../mailer.js";
-import { sendVerificationMail, verifyMailConfigured } from "../verify-mail.js";
+import { sendVerificationMail } from "../verify-mail.js";
 import { logger } from "../logger.js";
 
 export const authRouter = Router();
@@ -209,17 +209,20 @@ authRouter.post("/register", async (req, res, next) => {
       select: safeUserSelect,
     });
     await ensureEtherealPool(user.id, user.email).catch((e) => logger.warn({ e }, "sender pool seed failed"));
+    // Attempt delivery, but report honestly: a silent "check your email" after
+    // a failed send is how verification mails go missing unnoticed.
+    let mailed = false;
     try {
       await sendVerificationMail(user.email, verificationLink(signVerifyToken(user.id)), user.name);
+      mailed = true;
     } catch (err) {
-      // Don't block register on mail failure (MoonSeek pattern) — resend covers it.
       logger.warn({ err }, "verification mail failed");
     }
     return res.status(201).json({
       user,
-      message: verifyMailConfigured()
+      message: mailed
         ? "Registered. Check your email to verify (link expires in 15 minutes)."
-        : "Registered. Mail service is not configured — ask the admin, then resend verification.",
+        : "Registered, but the verification email could not be sent. Use Resend on the login screen.",
     });
   } catch (err) {
     next(err);
