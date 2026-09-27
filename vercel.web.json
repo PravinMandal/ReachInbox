@@ -2,5 +2,8 @@
   "buildCommand": "npm --workspace packages/shared run build && npm --workspace apps/web run build",
   "outputDirectory": "apps/web/dist",
   "framework": "vite",
-  "rewrites": [{ "source": "/(.*)", "destination": "/" }]
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "https://reachinbox-api.vercel.app/api/$1" },
+    { "source": "/(.*)", "destination": "/" }
+  ]
 }
