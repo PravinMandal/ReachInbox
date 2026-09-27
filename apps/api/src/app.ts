@@ -2,14 +2,12 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import { pinoHttp } from "pino-http";
 import { createBullBoard } from "@bull-board/api";
 import { BullMQAdapter } from "@bull-board/api/bullMQAdapter.js";
-// Static JSON import: @bull-board/api locates its UI at runtime through an
-// eval'd require.resolve('@bull-board/ui/package.json'), which serverless
-// file-tracers cannot see. This import forces the file into the bundle.
-import uiPackageJson from "@bull-board/ui/package.json" with { type: "json" };
-void uiPackageJson;
 import { ExpressAdapter } from "@bull-board/express";
 import { env } from "./env.js";
 import { logger } from "./logger.js";
@@ -48,12 +46,40 @@ export function createApp(): express.Express {
   app.use("/api/worker", workerRouter);
 
   // Live BullMQ dashboard — JWT-gated like every other /api route.
+  // UI assets are VENDORED (apps/api/vendor/bull-board-ui, see its README):
+  // @bull-board/api resolves its EJS shell via eval'd require.resolve, which
+  // serverless file-tracers cannot follow (live 500'd with "Failed to lookup
+  // view index.ejs"). uiBasePath (import.meta-relative, tracer-visible) ships
+  // the files inside the bundle on every host. If the directory ever goes
+  // missing, degrade to a clean pointer instead of a 500 stack.
+  const uiBasePath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "vendor", "bull-board-ui");
   const serverAdapter = new ExpressAdapter();
   serverAdapter.setBasePath("/admin/queues");
   // Cast: @bull-board/api pins an older bullmq Job type; at runtime the
   // adapter only calls queue getters, which are stable across 5.x.
-  createBullBoard({ queues: [new BullMQAdapter(emailQueue) as never], serverAdapter });
-  app.use("/admin/queues", authMiddleware, serverAdapter.getRouter());
+  createBullBoard({
+    queues: [new BullMQAdapter(emailQueue) as never],
+    serverAdapter,
+    options: { uiBasePath, uiConfig: {} },
+  });
+  app.use(
+    "/admin/queues",
+    authMiddleware,
+    (req, res, next) => {
+      // Layout mirrors @bull-board/ui (dist/index.ejs + dist/static).
+      if (!existsSync(path.join(uiBasePath, "dist", "index.ejs"))) {
+        res.status(503).json({
+          error: {
+            code: "BOARD_UNAVAILABLE",
+            message: "Advanced board assets missing on this host — use the native /queues dashboard.",
+          },
+        });
+        return;
+      }
+      next();
+    },
+    serverAdapter.getRouter(),
+  );
 
   app.use("/api", notFound);
   app.use(errorMiddleware);

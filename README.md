@@ -163,7 +163,8 @@ sub-daily cron); 500/batch + 4MB upload caps live.
 
 Tradeoffs: single queue `email-send` (colon illegal in
 BullMQ ≥5); limiter kept as backstop; reservation-before-CAS (fail-closed); ES dual-write
-(not outbox) + `reindex` script; `chat.postMessage` over webhooks; JWT cookie, no rotation;
+(not outbox) + `reindex` script; bull-board UI vendored (`apps/api/vendor`, tracer-blind
+EJS — see its README); `chat.postMessage` over webhooks; JWT cookie, no rotation;
 Vite SPA over Next (no SSR need, fewer Hobby invocations); Prisma (migration DX);
 external pinger over Vercel Cron (daily-only Hobby); ticket-based Google login (no
 cross-site cookie, console-independent).

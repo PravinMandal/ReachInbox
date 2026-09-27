@@ -17,6 +17,7 @@
     "db:setup": "tsx scripts/db-setup.ts",
     "db:seed:dev": "tsx scripts/seed-dev.ts",
     "db:generate": "prisma generate",
+    "vendor:bullboard": "rm -rf vendor/bull-board-ui/dist && mkdir -p vendor/bull-board-ui/dist && cp -r ../../node_modules/@bull-board/ui/dist/index.ejs ../../node_modules/@bull-board/ui/dist/static vendor/bull-board-ui/dist/",
     "reindex": "tsx scripts/reindex.ts",
     "bulk-schedule": "tsx scripts/bulk-schedule.ts"
   },
