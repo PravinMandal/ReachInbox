@@ -12,3 +12,5 @@ sessions/
 .vercel/
 .env.live
 .playwright-mcp/
+.vercel
+.env*
