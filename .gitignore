@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# ...except the vendored bull-board UI (committed deliberately, see its README)
+!apps/api/vendor/bull-board-ui/dist/
 build/
 *.log
 .env
