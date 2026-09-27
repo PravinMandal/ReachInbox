@@ -4,6 +4,7 @@
   "framework": "vite",
   "rewrites": [
     { "source": "/api/(.*)", "destination": "https://reachinbox-api.vercel.app/api/$1" },
+    { "source": "/admin/(.*)", "destination": "https://reachinbox-api.vercel.app/admin/$1" },
     { "source": "/(.*)", "destination": "/" }
   ]
 }

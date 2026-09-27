@@ -9,22 +9,24 @@ import { emailQueue, type SendJobData } from "../queue.js";
 export const workerRouter = Router();
 
 /**
- * Live queue overview for the in-app Queues page. Counts are queue-global
- * (single shared queue); the job list below is scoped to the caller.
+ * Queue overview for the in-app Queues page. Counts are EMAIL truth scoped to
+ * the caller (scheduled-due / scheduled-future / sending / sent / failed) —
+ * exact on every runtime, including live where no persistent worker moves
+ * BullMQ jobs to completed/failed. Raw queue internals stay on bull-board.
  */
-workerRouter.get("/status", authMiddleware, async (_req, res, next) => {
+workerRouter.get("/status", authMiddleware, async (req, res, next) => {
   try {
-    const [waiting, delayed, active, completed, failed] = await Promise.all([
-      emailQueue.getWaitingCount().catch(() => -1),
-      emailQueue.getDelayedCount().catch(() => -1),
-      emailQueue.getActiveCount().catch(() => -1),
-      emailQueue.getCompletedCount().catch(() => -1),
-      emailQueue.getFailedCount().catch(() => -1),
+    const userId = req.userId!;
+    const now = new Date();
+    const [delayed, waiting, active, completed, failed, due] = await Promise.all([
+      prisma.email.count({ where: { userId, status: "scheduled", scheduledAt: { gt: now } } }),
+      prisma.email.count({ where: { userId, status: "scheduled", scheduledAt: { lte: now } } }),
+      prisma.email.count({ where: { userId, status: "sending" } }),
+      prisma.email.count({ where: { userId, status: "sent" } }),
+      prisma.email.count({ where: { userId, status: "failed" } }),
+      prisma.email.count({ where: { status: "scheduled", scheduledAt: { lte: now } } }),
     ]);
-    const due = await prisma.email.count({
-      where: { status: "scheduled", scheduledAt: { lte: new Date() } },
-    });
-    res.json({ waiting, delayed, active, completed, failed, due, now: new Date().toISOString() });
+    res.json({ waiting, delayed, active, completed, failed, due, now: now.toISOString() });
   } catch (err) {
     next(err);
   }
@@ -34,11 +36,15 @@ const JOB_STATES = ["waiting", "active", "delayed", "completed", "failed"] as co
 type JobState = (typeof JOB_STATES)[number];
 
 /**
- * Job list scoped to the caller: BullMQ state + the email it carries.
- * Users only ever see their own emails (jobId = email.id, filtered by userId).
+ * Job list scoped to the caller. Placement follows EMAIL truth, not raw BullMQ
+ * state: live has no persistent worker, so a sent email's job can sit in
+ * `waiting` forever — it is shown under Completed anyway (and hidden from
+ * Waiting). Missing-job emails are synthesized so no tab ever drops rows that
+ * the counts promise. Users only ever see their own emails.
  */
 workerRouter.get("/jobs", authMiddleware, async (req, res, next) => {
   try {
+    const userId = req.userId!;
     const raw = String(req.query.state ?? "delayed");
     const state: JobState = (JOB_STATES as readonly string[]).includes(raw) ? (raw as JobState) : "delayed";
     const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 20) || 20));
@@ -46,29 +52,98 @@ workerRouter.get("/jobs", authMiddleware, async (req, res, next) => {
     const emailIds = jobs.map((j) => (j.data as SendJobData)?.emailId).filter(Boolean);
     const emails = emailIds.length
       ? await prisma.email.findMany({
-          where: { id: { in: emailIds }, userId: req.userId! },
-          select: { id: true, to: true, subject: true, status: true, scheduledAt: true, sentAt: true, error: true },
+          where: { id: { in: emailIds }, userId },
+          select: {
+            id: true, to: true, subject: true, status: true, attempts: true,
+            scheduledAt: true, sentAt: true, createdAt: true, error: true,
+          },
         })
       : [];
     const byId = new Map(emails.map((e) => [e.id, e]));
-    // Drop jobs whose email belongs to someone else (or is gone).
-    const data = jobs
-      .map((j) => {
-        const email = byId.get((j.data as SendJobData)?.emailId);
-        if (!email) return null;
-        return {
-          jobId: j.id ?? "",
+    const terminalBucket = (s: string): JobState | null =>
+      s === "sent" ? "completed" : s === "failed" ? "failed" : null;
+
+    type Row = {
+      jobId: string; state: JobState; attemptsMade: number; delay: number;
+      timestamp: number; processedOn: number | null; finishedOn: number | null;
+      failedReason: string | null;
+      email: {
+        id: string; to: string; subject: string; status: never; attempts: number;
+        scheduledAt: string; sentAt: string | null; createdAt: string; error: string | null;
+      };
+    };
+    const data: Row[] = [];
+    const represented = new Set<string>();
+    for (const j of jobs) {
+      const email = byId.get((j.data as SendJobData)?.emailId);
+      if (!email) continue; // someone else's job (or gone)
+      const bucket = terminalBucket(String(email.status));
+      if (bucket && bucket !== state) continue; // truth lives under another tab
+      represented.add(email.id);
+      data.push({
+        jobId: j.id ?? "",
+        state,
+        attemptsMade: j.attemptsMade,
+        delay: j.opts.delay ?? 0,
+        timestamp: j.timestamp,
+        processedOn: j.processedOn ?? null,
+        finishedOn: j.finishedOn ?? null,
+        failedReason: (j.failedReason ?? "").slice(0, 300) || null,
+        email: {
+          id: email.id, to: email.to, subject: email.subject,
+          status: email.status as never, attempts: email.attempts,
+          scheduledAt: email.scheduledAt.toISOString(),
+          sentAt: email.sentAt?.toISOString() ?? null,
+          createdAt: email.createdAt.toISOString(), error: email.error,
+        },
+      });
+    }
+
+    // Supplement tabs whose BullMQ set is incomplete (live has no worker to
+    // move jobs). Synthesized rows carry email truth with job-shaped fields.
+    const now = new Date();
+    const supplementWhere =
+      state === "completed"
+        ? { userId, status: "sent" as never }
+        : state === "failed"
+          ? { userId, status: "failed" as never }
+          : state === "delayed"
+            ? { userId, status: "scheduled" as never, scheduledAt: { gt: now } }
+            : state === "waiting"
+              ? { userId, status: "scheduled" as never, scheduledAt: { lte: now } }
+              : null;
+    if (supplementWhere && data.length < limit) {
+      const missing = await prisma.email.findMany({
+        where: { ...supplementWhere, id: { notIn: [...represented] } },
+        select: {
+          id: true, to: true, subject: true, status: true, attempts: true,
+          scheduledAt: true, sentAt: true, createdAt: true, error: true,
+        },
+        orderBy: state === "completed" || state === "failed" ? { sentAt: "desc" } : { scheduledAt: "asc" },
+        take: limit - data.length,
+      });
+      for (const e of missing) {
+        data.push({
+          jobId: e.id,
           state,
-          attemptsMade: j.attemptsMade,
-          delay: j.opts.delay ?? 0,
-          timestamp: j.timestamp,
-          processedOn: j.processedOn ?? null,
-          finishedOn: j.finishedOn ?? null,
-          failedReason: (j.failedReason ?? "").slice(0, 300) || null,
-          email,
-        };
-      })
-      .filter((r): r is NonNullable<typeof r> => r !== null);
+          attemptsMade: e.attempts,
+          delay: state === "delayed" ? Math.max(0, e.scheduledAt.getTime() - Date.now()) : 0,
+          timestamp: e.createdAt.getTime(),
+          processedOn: null,
+          finishedOn: e.sentAt?.getTime() ?? null,
+          failedReason: state === "failed" ? e.error?.slice(0, 300) ?? null : null,
+          email: {
+            id: e.id, to: e.to, subject: e.subject, status: e.status as never,
+            attempts: e.attempts, scheduledAt: e.scheduledAt.toISOString(),
+            sentAt: e.sentAt?.toISOString() ?? null,
+            createdAt: e.createdAt.toISOString(), error: e.error,
+          },
+        });
+      }
+      if (state === "completed" || state === "failed") {
+        data.sort((a, b) => (b.finishedOn ?? 0) - (a.finishedOn ?? 0));
+      }
+    }
     res.json({ state, data });
   } catch (err) {
     next(err);

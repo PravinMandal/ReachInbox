@@ -26,8 +26,9 @@ npm run dev:web     # :5173
 ```
 
 Health: `GET localhost:4000/api/health` → `{ok, db, redis, es}`.
-Queue dashboard: in-app `/queues` (sidebar → Queues: live counts, per-state tabs,
-per-user job rows, retry) + advanced `localhost:4000/admin/queues` (bull-board, login-gated).
+Queue dashboard: in-app `/queues` (sidebar → Queues: live email-truth counts, per-state tabs,
+per-user job rows, retry) + advanced `localhost:4000/admin/queues` (bull-board, login-gated;
+live works via same-origin `/admin` proxy on the web host).
 
 `DEV_AUTH_BYPASS=true` (local only, never prod) lets you click through the UI
 without Google creds. Real login needs `GOOGLE_CLIENT_ID` + `VITE_GOOGLE_CLIENT_ID`.

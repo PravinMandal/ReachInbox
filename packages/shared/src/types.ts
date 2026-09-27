@@ -85,8 +85,10 @@ export interface QueueJobRow {
     to: string;
     subject: string;
     status: EmailStatus;
+    attempts: number;
     scheduledAt: string;
     sentAt: string | null;
+    createdAt: string;
     error: string | null;
   };
 }
