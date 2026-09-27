@@ -80,6 +80,30 @@ export async function verifyGoogleIdToken(
   return { googleId: p.sub, email: p.email, name: p.name ?? p.email, avatar: p.picture ?? null };
 }
 
+export type GoogleProfile = { googleId: string; email: string; name: string; avatar: string | null };
+
+/**
+ * Google sign-in with password-account linking. A plain upsert by googleId
+ * blows up with P2002 when the email already exists from email+password
+ * signup — instead, attach the Google identity to that row.
+ */
+export async function linkGoogleUser(g: GoogleProfile) {
+  try {
+    return await prisma.user.upsert({
+      where: { googleId: g.googleId },
+      create: { googleId: g.googleId, email: g.email, name: g.name, avatar: g.avatar, isVerified: true },
+      update: { email: g.email, name: g.name, avatar: g.avatar, isVerified: true },
+    });
+  } catch (err) {
+    if ((err as { code?: string })?.code !== "P2002") throw err;
+    logger.info({ email: g.email }, "linking Google identity to existing password account");
+    return await prisma.user.update({
+      where: { email: g.email },
+      data: { googleId: g.googleId, name: g.name, avatar: g.avatar, isVerified: true },
+    });
+  }
+}
+
 export async function authMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     if (env.DEV_AUTH_BYPASS && !isProd) {

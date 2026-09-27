@@ -11,6 +11,7 @@ import {
   comparePassword,
   ensureDevUser,
   hashPassword,
+  linkGoogleUser,
   safeUserSelect,
   setAuthCookie,
   signToken,
@@ -38,11 +39,7 @@ authRouter.post("/google", async (req, res, next) => {
       return res.status(500).json({ error: { code: "NOT_CONFIGURED", message: "GOOGLE_CLIENT_ID not set" } });
     }
     const g = await verifyGoogleIdToken(idToken);
-    const user = await prisma.user.upsert({
-      where: { googleId: g.googleId },
-      create: { googleId: g.googleId, email: g.email, name: g.name, avatar: g.avatar, isVerified: true },
-      update: { email: g.email, name: g.name, avatar: g.avatar, isVerified: true },
-    });
+    const user = await linkGoogleUser(g);
     await ensureEtherealPool(user.id, user.email).catch((e) => logger.warn({ e }, "sender pool seed failed"));
     setAuthCookie(res, signToken(user.id));
     return res.json({ user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar } });
@@ -111,11 +108,7 @@ authRouter.get("/google/callback", async (req, res) => {
     const { tokens } = await client.getToken(code);
     if (!tokens.id_token) return fail();
     const g = await verifyGoogleIdToken(tokens.id_token);
-    const user = await prisma.user.upsert({
-      where: { googleId: g.googleId },
-      create: { googleId: g.googleId, email: g.email, name: g.name, avatar: g.avatar, isVerified: true },
-      update: { email: g.email, name: g.name, avatar: g.avatar, isVerified: true },
-    });
+    const user = await linkGoogleUser(g);
     await ensureEtherealPool(user.id, user.email).catch((e) => logger.warn({ e }, "sender pool seed failed"));
     setAuthCookie(res, signToken(user.id));
     return res.redirect(`${env.FRONTEND_URL.replace(/\/$/, "")}/?login=google`);
