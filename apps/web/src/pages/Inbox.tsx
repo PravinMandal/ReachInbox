@@ -25,7 +25,8 @@ export function InboxPage() {
   const counts = useCounts(Boolean(me.data));
   const list = useEmails({ status: tab, q: q.trim() || undefined, page, enabled: Boolean(me.data) });
 
-  // Landing spot after Google OAuth callback (?login=google) — greet once.
+  // Legacy ?login=google greeting (direct-cookie era). Ticket redemption lives
+  // in Guard (App.tsx) — it must run before the auth decision.
   useEffect(() => {
     if (params.get("login") === "google") {
       toast.success("Signed in with Google");

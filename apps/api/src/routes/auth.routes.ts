@@ -9,9 +9,11 @@ import {
   authMiddleware,
   clearAuthCookie,
   comparePassword,
+  consumeLoginTicket,
   ensureDevUser,
   hashPassword,
   linkGoogleUser,
+  mintLoginTicket,
   safeUserSelect,
   setAuthCookie,
   signToken,
@@ -53,8 +55,17 @@ authRouter.post("/google", async (req, res, next) => {
  * never rendered its iframe on Vercel (blank in every browser, zero backend
  * contact), so login goes through a full-page redirect instead: frontend
  * links to /google/url → user consents at Google → Google calls back here
- * with ?code= → we exchange, verify, set the same JWT cookie, and bounce
- * to the app. Needs GOOGLE_REDIRECT_URI in the console's redirect list.
+ * with ?code= → we exchange, verify, and bounce to the app with a
+ * single-use login ticket that the SPA redeems same-origin (see /consume).
+ *
+ * Why a ticket instead of setting the session cookie in the callback?
+ * The callback lives on the API host while the app lives on the web host —
+ * two vercel.app subdomains are cross-site (public suffix), so a cookie
+ * written in the callback is dropped by Brave/Chrome before /me runs.
+ * The ticket (short-lived, purpose-bound, single-use via Redis NX/GETDEL)
+ * carries the login across hosts without any cross-site cookie. As a bonus,
+ * only ONE stable callback URI ever needs registering in the Google console,
+ * so preview/alias domains keep working with zero console edits.
  *
  * State is a short-lived signed JWT (NOT a cookie): Brave drops cookies set
  * in the third-party XHR that mints the auth URL, so a cookie-bound state
@@ -110,11 +121,39 @@ authRouter.get("/google/callback", async (req, res) => {
     const g = await verifyGoogleIdToken(tokens.id_token);
     const user = await linkGoogleUser(g);
     await ensureEtherealPool(user.id, user.email).catch((e) => logger.warn({ e }, "sender pool seed failed"));
-    setAuthCookie(res, signToken(user.id));
-    return res.redirect(`${env.FRONTEND_URL.replace(/\/$/, "")}/?login=google`);
+    // No cookie here (cross-site write — see header comment). Mint a
+    // single-use ticket; the SPA redeems it same-origin via /consume.
+    const ticket = await mintLoginTicket(user.id);
+    return res.redirect(`${env.FRONTEND_URL.replace(/\/$/, "")}/?ticket=${ticket}`);
   } catch (err) {
     logger.warn({ err }, "google callback failed");
     return fail();
+  }
+});
+
+/**
+ * Redeem a single-use login ticket (same-origin — the session cookie set here
+ * is first-party, so ITP/Brave Shields leave it alone). Ticket is consumed
+ * atomically: replaying it (back button, double submit) fails closed.
+ */
+authRouter.post("/google/consume", async (req, res, next) => {
+  try {
+    const { ticket } = req.body as { ticket?: string };
+    if (!ticket) {
+      return res.status(400).json({ error: { code: "BAD_REQUEST", message: "Ticket required" } });
+    }
+    let userId: string;
+    try {
+      userId = await consumeLoginTicket(String(ticket));
+    } catch {
+      return res.status(401).json({ error: { code: "INVALID_TICKET", message: "Login expired — please sign in again" } });
+    }
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: safeUserSelect });
+    if (!user) return res.status(401).json({ error: { code: "INVALID_TICKET", message: "Login expired — please sign in again" } });
+    setAuthCookie(res, signToken(userId));
+    return res.json({ user });
+  } catch (err) {
+    next(err);
   }
 });
 

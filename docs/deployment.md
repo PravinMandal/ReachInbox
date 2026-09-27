@@ -51,7 +51,10 @@ Then GitHub Actions secrets (repo → Settings → Secrets → Actions, or `gh s
 API env (copy values from `.env.live` + `apps/api/.env` — never echo them to logs):
 `DATABASE_URL` (live Neon + `?pgbouncer=true&connection_limit=1`), `REDIS_URL` (Upstash
 `rediss://`, TCP only), `ES_NODE` (leave **empty** → Postgres fallback), `JWT_SECRET`,
-`ENCRYPTION_KEY`, `FRONTEND_URL=https://<web>`, `GOOGLE_CLIENT_ID`, `SLACK_CLIENT_ID`,
+`ENCRYPTION_KEY`, `FRONTEND_URL=https://<web>`, `GOOGLE_CLIENT_ID`,
+`GOOGLE_REDIRECT_URI=https://<api>/api/auth/google/callback` (**api host** — the
+callback mints a same-origin-redeemed login ticket, so the api URI is the only one
+that ever needs registering; web-five URI additionally registered is harmless), `SLACK_CLIENT_ID`,
 `SLACK_CLIENT_SECRET`, `SLACK_REDIRECT_URI=https://<api>/api/slack/callback`,
 `SLACK_DEFAULT_CHANNEL_ID`, `WORKER_CONCURRENCY=5`, `MIN_GAP_MS=2000`,
 `MAX_EMAILS_PER_HOUR_GLOBAL=200`, `CRON_SECRET`. `NODE_ENV=production`.

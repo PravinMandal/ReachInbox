@@ -264,6 +264,45 @@
 - [ ] USER (last console edit, keep the old URI too — harmless): add the
   web-five callback URI above to Authorized redirect URIs → Save → retry.
 
+## 2026-09-28 — Live Google sign-in: redirect_uri_mismatch proven at Google's door
+
+- User report "google sign in is not working" → reproduced end-to-end via
+  Playwright against LIVE: login → Google button → Google answers **Error 400:
+  redirect_uri_mismatch** ("Access blocked: This app's request is invalid").
+  Our emitted URI is byte-exact
+  `https://reachinbox-web-five.vercel.app/api/auth/google/callback`
+  (decoded from live `/google/url`; correct client_id) — Google rejects it
+  because that exact string is not in the console's Authorized redirect URIs.
+- Ruled out on our side: URL minting, state JWT, callback handler (junk
+  code/state → clean `google_failed`, no crash), FRONTEND_URL (web-five,
+  via Location header), cookie binding (proxy design verified earlier),
+  local flow (reaches accounts.google.com identifier page = localhost URI
+  registered, our side fine). Nothing left to fix in code.
+- Fix = user console click (cannot be done programmatically): Google Cloud
+  console → APIs & Services → Credentials → OAuth 2.0 Client IDs → open the
+  client starting `187737978073-` → Authorized redirect URIs → ADD exactly
+  `https://reachinbox-web-five.vercel.app/api/auth/google/callback` → Save →
+  retry (propagation usually <5 min). Proof of success: the same click shows
+  the account chooser instead of Error 400.
+
+## 2026-09-28 — Google login via single-use ticket (console-independent)
+
+- Live `redirect_uri_mismatch` persisted despite correct web-five URI (propagation
+  ruled out across probes; exact bytes verified in flight). Root problem with the
+  direct-cookie design: callback must live where the cookie can be written, but
+  only console-registered URIs are usable — a deadlock whenever the console lags.
+- Fix: callback (stable api-host URI, registered since day one) mints a
+  single-use login ticket (JWT purpose `login_ticket`, 5m, jti in Redis NX/GETDEL)
+  and 302s to `FRONTEND_URL/?ticket=…`; SPA redeems same-origin via
+  `POST /google/consume` (first-party cookie, Brave/ITP-proof). Replay/expired/
+  garbage → 401 closed. No new console edit ever needed (alias domains included).
+- Caught own bug in test: Guard bounced to /login before Inbox's effect redeemed
+  → redemption moved INTO Guard (pre-auth decision). Legacy `?login=google`
+  greeting kept.
+- Verified locally: mint→consume→cookie→user, replay 401, garbage 401, SPA leg
+  → toast + real identity + ticket stripped. `tsc` clean. Deploy agent: set live
+  `GOOGLE_REDIRECT_URI` to the api-host callback + redeploy api.
+
 ## Conventions
 
 - Every entry: `[date] what + why + verify + result`.

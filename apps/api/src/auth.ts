@@ -1,14 +1,18 @@
 import type { NextFunction, Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { randomBytes } from "node:crypto";
 import { OAuth2Client } from "google-auth-library";
 import { prisma } from "./db.js";
+import { redis } from "./redis.js";
 import { env, isProd } from "./env.js";
 import { logger } from "./logger.js";
 
 const googleClient = new OAuth2Client(env.GOOGLE_CLIENT_ID);
 const COOKIE = "token";
 const VERIFY_PURPOSE = "email_verify";
+const TICKET_PURPOSE = "login_ticket";
+const TICKET_TTL_SEC = 300;
 
 export interface AuthUser {
   id: string;
@@ -46,6 +50,30 @@ export function signVerifyToken(userId: string): string {
 export function verifyVerifyToken(token: string): string {
   const decoded = jwt.verify(token, env.JWT_SECRET) as { sub?: string; purpose?: string };
   if (!decoded.sub || decoded.purpose !== VERIFY_PURPOSE) throw new Error("Invalid token purpose");
+  return decoded.sub;
+}
+
+/**
+ * Single-use login ticket bridging the cross-site OAuth callback (see
+ * auth.routes). Stored in Redis with NX (mint) / GETDEL (consume): replaying
+ * a ticket — back button, double submit, leaked URL — fails closed.
+ */
+export async function mintLoginTicket(userId: string): Promise<string> {
+  const jti = randomBytes(16).toString("hex");
+  await redis.set(`login:ticket:${jti}`, userId, "EX", TICKET_TTL_SEC, "NX");
+  return jwt.sign({ sub: userId, jti, purpose: TICKET_PURPOSE }, env.JWT_SECRET, {
+    expiresIn: TICKET_TTL_SEC,
+  });
+}
+
+export async function consumeLoginTicket(ticket: string): Promise<string> {
+  const decoded = jwt.verify(ticket, env.JWT_SECRET) as { sub?: string; jti?: string; purpose?: string };
+  if (!decoded.sub || !decoded.jti || decoded.purpose !== TICKET_PURPOSE) {
+    throw new Error("Invalid ticket");
+  }
+  // Atomic single-use: first consumer wins, replays get null.
+  const owner = await redis.getdel(`login:ticket:${decoded.jti}`);
+  if (owner !== decoded.sub) throw new Error("Ticket already used or expired");
   return decoded.sub;
 }
 
