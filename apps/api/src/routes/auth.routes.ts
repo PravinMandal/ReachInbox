@@ -18,7 +18,7 @@ import {
   verifyGoogleIdToken,
   verifyVerifyToken,
 } from "../auth.js";
-import { env, isProd } from "../env.js";
+import { env } from "../env.js";
 import { ensureEtherealPool } from "../mailer.js";
 import { sendVerificationMail, verifyMailConfigured } from "../verify-mail.js";
 import { logger } from "../logger.js";
@@ -58,21 +58,29 @@ authRouter.post("/google", async (req, res, next) => {
  * links to /google/url → user consents at Google → Google calls back here
  * with ?code= → we exchange, verify, set the same JWT cookie, and bounce
  * to the app. Needs GOOGLE_REDIRECT_URI in the console's redirect list.
+ *
+ * State is a short-lived signed JWT (NOT a cookie): Brave drops cookies set
+ * in the third-party XHR that mints the auth URL, so a cookie-bound state
+ * never comes back on the top-level return navigation.
  */
-const OAUTH_STATE_COOKIE = "oauth_state";
+const OAUTH_STATE_PURPOSE = "oauth_state";
+
+function signState(): string {
+  return jwt.sign({ nonce: randomBytes(16).toString("hex"), purpose: OAUTH_STATE_PURPOSE }, env.JWT_SECRET, {
+    expiresIn: "10m",
+  });
+}
+
+function verifyState(state: string): void {
+  const decoded = jwt.verify(state, env.JWT_SECRET) as { purpose?: string };
+  if (decoded.purpose !== OAUTH_STATE_PURPOSE) throw new Error("Invalid oauth state");
+}
 
 authRouter.get("/google/url", (_req, res) => {
   if (!env.GOOGLE_CLIENT_ID) {
     return res.status(500).json({ error: { code: "NOT_CONFIGURED", message: "GOOGLE_CLIENT_ID not set" } });
   }
-  const state = randomBytes(32).toString("hex");
-  res.cookie(OAUTH_STATE_COOKIE, state, {
-    httpOnly: true,
-    sameSite: isProd ? "none" : "lax",
-    secure: isProd,
-    maxAge: 10 * 60 * 1000,
-    path: "/",
-  });
+  const state = signState();
   const url = new OAuth2Client(env.GOOGLE_CLIENT_ID).generateAuthUrl({
     access_type: "online",
     scope: ["openid", "email", "profile"],
@@ -88,9 +96,12 @@ authRouter.get("/google/callback", async (req, res) => {
     res.redirect(`${env.FRONTEND_URL.replace(/\/$/, "")}/login?error=google_failed`);
   try {
     const { code, state } = req.query as { code?: string; state?: string };
-    const saved = req.cookies?.[OAUTH_STATE_COOKIE] as string | undefined;
-    if (!code || !state || !saved || state !== saved) return fail();
-    res.clearCookie(OAUTH_STATE_COOKIE, { path: "/" });
+    if (!code || !state) return fail();
+    try {
+      verifyState(state);
+    } catch {
+      return fail();
+    }
     if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) return fail();
     const client = new OAuth2Client(
       env.GOOGLE_CLIENT_ID,
