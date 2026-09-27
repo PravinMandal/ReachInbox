@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import { AppShell } from "../components/Sidebar.js";
 import { EmailEmpty, EmailListSkeleton, EmailRow } from "../components/EmailList.js";
 import { useAuth, useCounts, useEmails } from "../hooks/queries.js";
@@ -23,6 +24,16 @@ export function InboxPage() {
   const me = useAuth();
   const counts = useCounts(Boolean(me.data));
   const list = useEmails({ status: tab, q: q.trim() || undefined, page, enabled: Boolean(me.data) });
+
+  // Landing spot after Google OAuth callback (?login=google) — greet once.
+  useEffect(() => {
+    if (params.get("login") === "google") {
+      toast.success("Signed in with Google");
+      const next = new URLSearchParams(params);
+      next.delete("login");
+      setParams(next, { replace: true });
+    }
+  }, [params, setParams]);
 
   if (me.isLoading) return <div className="p-10">Loading…</div>;
   if (me.isError || !me.data) {

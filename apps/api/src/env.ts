@@ -19,6 +19,8 @@ const envSchema = z.object({
   ENCRYPTION_KEY: z.string().min(16).default("dev-only-encryption-key-32bytes!"),
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),
+  // Server-side OAuth code flow: Google redirects back here with ?code=.
+  GOOGLE_REDIRECT_URI: z.string().default("http://localhost:4000/api/auth/google/callback"),
   // Outbound mail for auth (verification emails must reach REAL inboxes —
   // Ethereal never delivers). Gmail OAuth2, same pattern as the MoonSeek project.
   GMAIL_USER: z.string().default(""),

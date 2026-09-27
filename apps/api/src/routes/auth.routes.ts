@@ -1,6 +1,8 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import jwt from "jsonwebtoken";
+import { randomBytes } from "node:crypto";
+import { OAuth2Client } from "google-auth-library";
 import { passwordLoginSchema, registerSchema } from "@reachinbox/shared";
 import { prisma } from "../db.js";
 import {
@@ -16,7 +18,7 @@ import {
   verifyGoogleIdToken,
   verifyVerifyToken,
 } from "../auth.js";
-import { env } from "../env.js";
+import { env, isProd } from "../env.js";
 import { ensureEtherealPool } from "../mailer.js";
 import { sendVerificationMail, verifyMailConfigured } from "../verify-mail.js";
 import { logger } from "../logger.js";
@@ -46,6 +48,69 @@ authRouter.post("/google", async (req, res, next) => {
     return res.json({ user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar } });
   } catch (err) {
     next(err);
+  }
+});
+
+/**
+ * Server-side Google OAuth (authorization-code flow). The GIS popup button
+ * never rendered its iframe on Vercel (blank in every browser, zero backend
+ * contact), so login goes through a full-page redirect instead: frontend
+ * links to /google/url → user consents at Google → Google calls back here
+ * with ?code= → we exchange, verify, set the same JWT cookie, and bounce
+ * to the app. Needs GOOGLE_REDIRECT_URI in the console's redirect list.
+ */
+const OAUTH_STATE_COOKIE = "oauth_state";
+
+authRouter.get("/google/url", (_req, res) => {
+  if (!env.GOOGLE_CLIENT_ID) {
+    return res.status(500).json({ error: { code: "NOT_CONFIGURED", message: "GOOGLE_CLIENT_ID not set" } });
+  }
+  const state = randomBytes(32).toString("hex");
+  res.cookie(OAUTH_STATE_COOKIE, state, {
+    httpOnly: true,
+    sameSite: isProd ? "none" : "lax",
+    secure: isProd,
+    maxAge: 10 * 60 * 1000,
+    path: "/",
+  });
+  const url = new OAuth2Client(env.GOOGLE_CLIENT_ID).generateAuthUrl({
+    access_type: "online",
+    scope: ["openid", "email", "profile"],
+    redirect_uri: env.GOOGLE_REDIRECT_URI,
+    state,
+    prompt: "select_account",
+  });
+  return res.json({ url });
+});
+
+authRouter.get("/google/callback", async (req, res) => {
+  const fail = () =>
+    res.redirect(`${env.FRONTEND_URL.replace(/\/$/, "")}/login?error=google_failed`);
+  try {
+    const { code, state } = req.query as { code?: string; state?: string };
+    const saved = req.cookies?.[OAUTH_STATE_COOKIE] as string | undefined;
+    if (!code || !state || !saved || state !== saved) return fail();
+    res.clearCookie(OAUTH_STATE_COOKIE, { path: "/" });
+    if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) return fail();
+    const client = new OAuth2Client(
+      env.GOOGLE_CLIENT_ID,
+      env.GOOGLE_CLIENT_SECRET,
+      env.GOOGLE_REDIRECT_URI,
+    );
+    const { tokens } = await client.getToken(code);
+    if (!tokens.id_token) return fail();
+    const g = await verifyGoogleIdToken(tokens.id_token);
+    const user = await prisma.user.upsert({
+      where: { googleId: g.googleId },
+      create: { googleId: g.googleId, email: g.email, name: g.name, avatar: g.avatar, isVerified: true },
+      update: { email: g.email, name: g.name, avatar: g.avatar, isVerified: true },
+    });
+    await ensureEtherealPool(user.id, user.email).catch((e) => logger.warn({ e }, "sender pool seed failed"));
+    setAuthCookie(res, signToken(user.id));
+    return res.redirect(`${env.FRONTEND_URL.replace(/\/$/, "")}/?login=google`);
+  } catch (err) {
+    logger.warn({ err }, "google callback failed");
+    return fail();
   }
 });
 

@@ -1,7 +1,6 @@
-import { useState } from "react";
-import { GoogleOAuthProvider, GoogleLogin, type CredentialResponse } from "@react-oauth/google";
+import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -11,29 +10,29 @@ import { api } from "../lib/api.js";
 import { Input } from "../components/Input.js";
 import { Logo } from "../components/Logo.js";
 
-const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? "";
-
 type Mode = "signin" | "signup";
 
-function GoogleSection({ onToken }: { onToken: (idToken: string) => void }) {
-  const onGoogle = (res: CredentialResponse) => {
-    if (!res.credential) return toast.error("Google sign-in returned no credential");
-    onToken(res.credential);
+function GoogleSection() {
+  const [pending, setPending] = useState(false);
+  const start = async () => {
+    setPending(true);
+    try {
+      const { url } = (await api.get("/api/auth/google/url")).data as { url: string };
+      window.location.href = url;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Google sign-in failed to start");
+      setPending(false);
+    }
   };
-  if (!clientId) {
-    return (
-      <button
-        className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl bg-brand-50 px-4 py-3 text-sm font-medium dark:bg-neutral-800"
-        onClick={() => toast.error("Google client ID not configured — ask admin to set VITE_GOOGLE_CLIENT_ID")}
-      >
-        <span className="font-bold text-green-600">G</span> Login with Google
-      </button>
-    );
-  }
   return (
-    <div className="mb-4 flex justify-center">
-      <GoogleLogin onSuccess={onGoogle} onError={() => toast.error("Google sign-in failed")} width="300" />
-    </div>
+    <button
+      className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl bg-brand-50 px-4 py-3 text-sm font-medium disabled:opacity-50 dark:bg-neutral-800"
+      onClick={() => void start()}
+      disabled={pending}
+    >
+      <span className="font-bold text-green-600">G</span>
+      {pending ? "Opening Google…" : "Sign in with Google"}
+    </button>
   );
 }
 
@@ -136,15 +135,17 @@ function SignupForm({ onDone }: { onDone: (email: string) => void }) {
 }
 
 function LoginCard() {
-  const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>("signin");
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+  const [search, setSearch] = useSearchParams();
 
-  const google = useMutation({
-    mutationFn: async (idToken: string) => (await api.post("/api/auth/google", { idToken })).data,
-    onSuccess: () => navigate("/"),
-    onError: (e: Error) => toast.error(e.message),
-  });
+  useEffect(() => {
+    if (search.get("error") === "google_failed") {
+      toast.error("Google sign-in failed — please try again");
+      search.delete("error");
+      setSearch(search, { replace: true });
+    }
+  }, [search, setSearch]);
 
   return (
     <div className="w-full max-w-md rounded-2xl border border-neutral-200 bg-white p-8 sm:p-10 dark:border-neutral-800 dark:bg-neutral-900">
@@ -182,7 +183,7 @@ function LoginCard() {
         </div>
       ) : (
         <>
-          <GoogleSection onToken={(t) => google.mutate(t)} />
+          <GoogleSection />
           <div className="mb-5 flex items-center gap-3 text-xs text-neutral-400">
             <span className="h-px flex-1 bg-neutral-200 dark:bg-neutral-700" />
             or {mode === "signin" ? "login" : "sign up"} through email
@@ -203,7 +204,7 @@ function LoginCard() {
 }
 
 export function LoginPage() {
-  const centered = (
+  return (
     <div className="grid min-h-screen place-items-center bg-neutral-100 p-4 dark:bg-neutral-950">
       <div className="w-full max-w-md">
         <LoginCard />
@@ -212,11 +213,5 @@ export function LoginPage() {
         </p>
       </div>
     </div>
-  );
-  if (!clientId) return centered;
-  return (
-    <GoogleOAuthProvider clientId={clientId}>
-      {centered}
-    </GoogleOAuthProvider>
   );
 }
