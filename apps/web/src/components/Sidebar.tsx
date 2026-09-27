@@ -127,7 +127,15 @@ export function AppShell({ user, counts, children }: { user: User; counts?: { sc
           ☰
         </button>
         <Logo withName />
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-1 sm:gap-2">
+          {/* Spec: top header shows the user's name, email, avatar + logout. */}
+          <div className="mr-1 flex min-w-0 items-center gap-2" title={`${user.name} · ${user.email}`}>
+            <Avatar name={user.name} src={user.avatar} size={32} />
+            <div className="hidden min-w-0 leading-tight min-[500px]:block">
+              <div className="max-w-[180px] truncate text-sm font-semibold">{user.name}</div>
+              <div className="max-w-[180px] truncate text-xs text-neutral-500">{user.email}</div>
+            </div>
+          </div>
           <ThemeToggle />
           <LogoutIconButton />
         </div>

@@ -150,20 +150,15 @@ export async function processOne(
 /** BullMQ job wrapper — translates `delayed` into moveToDelayed + DelayedError. */
 export async function processJob(job: Job<SendJobData>, token?: string): Promise<ProcessOutcome> {
   const { emailId, index, gapMs } = job.data;
-  try {
-    return await processOne(emailId, {
-      index,
-      gapMs,
-      reschedule: async (delayMs: number) => {
-        // Token-scoped delay: without it BullMQ throws `Missing lock`.
-        // DelayedError (not a plain Error) tells BullMQ this is a reschedule,
-        // not a failure — attempts are preserved.
-        if (token) await job.moveToDelayed(Date.now() + delayMs, token);
-        throw new DelayedError();
-      },
-    });
-  } catch (err) {
-    if (err instanceof DelayedError) throw err;
-    throw err;
-  }
+  return processOne(emailId, {
+    index,
+    gapMs,
+    reschedule: async (delayMs: number) => {
+      // Token-scoped delay: without it BullMQ throws `Missing lock`.
+      // DelayedError (not a plain Error) tells BullMQ this is a reschedule,
+      // not a failure — attempts are preserved.
+      if (token) await job.moveToDelayed(Date.now() + delayMs, token);
+      throw new DelayedError();
+    },
+  });
 }

@@ -1,16 +1,22 @@
 import { prisma } from "./db.js";
 import { env } from "./env.js";
 import { logger } from "./logger.js";
+import { redis } from "./redis.js";
 import { processOne } from "./processor.js";
 
-/**
- * Live (Vercel) driver. Hobby functions can't host a persistent BullMQ Worker,
- * so Vercel Cron hits `POST /api/worker/tick` 1/min; this claims due rows with
- * `FOR UPDATE SKIP LOCKED` (safe if two ticks overlap) and runs the SAME
- * `processOne()` the local worker uses. Limited outcomes bump `scheduledAt`
- * into the next window (DB-side equivalent of `moveToDelayed`).
- */
+// Live (Vercel) driver. Hobby has no persistent worker and its crons are
+// daily-only, so an external pinger (see .github/workflows/tick.yml) hits
+// POST /api/worker/tick; this claims due rows and runs the SAME processOne()
+// the local worker uses. Limited outcomes bump scheduledAt into the next
+// window (DB-side equivalent of moveToDelayed).
 export async function runTick(limit = 25): Promise<{ processed: number; sent: number; delayed: number }> {
+  // Overlap guard: FOR UPDATE below cannot span the whole run (autocommit), so
+  // serialize ticks with a Redis lock instead. A second tick exits quietly.
+  const lock = await redis.set("worker:tick:lock", "1", "EX", 90, "NX");
+  if (!lock) {
+    logger.info("tick skipped — previous tick still running");
+    return { processed: 0, sent: 0, delayed: 0 };
+  }
   const now = new Date();
   const rows = await prisma.$queryRaw<Array<{ id: string }>>`
     SELECT id FROM "Email"
@@ -42,5 +48,6 @@ export async function runTick(limit = 25): Promise<{ processed: number; sent: nu
     }
   }
   logger.info({ n: rows.length, sent, delayed }, "tick done");
+  await redis.del("worker:tick:lock").catch(() => undefined);
   return { processed: rows.length, sent, delayed };
 }

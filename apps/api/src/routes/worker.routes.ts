@@ -75,16 +75,24 @@ workerRouter.get("/jobs", authMiddleware, async (req, res, next) => {
   }
 });
 
-/** Retry one of the caller's failed jobs (no-op for other states). */
+/** Retry one of the caller's FAILED jobs: reset the row, then BullMQ redelivers
+ * the same jobId (processor re-sends; quota re-reserved — a retry is a new send). */
 workerRouter.post("/jobs/:id/retry", authMiddleware, async (req, res, next) => {
   try {
     const job = await emailQueue.getJob(req.params.id);
     if (!job) return res.status(404).json({ error: { code: "NOT_FOUND", message: "Job not found" } });
+    const state = await job.getState().catch(() => "unknown");
+    if (state !== "failed") {
+      return res.status(409).json({ error: { code: "WRONG_STATE", message: `Only failed jobs can be retried (state: ${state})` } });
+    }
     const emailId = (job.data as SendJobData)?.emailId;
     const mine = emailId
       ? await prisma.email.findFirst({ where: { id: emailId, userId: req.userId! }, select: { id: true } })
       : null;
     if (!mine) return res.status(404).json({ error: { code: "NOT_FOUND", message: "Job not found" } });
+    // Reset first: the processor's CAS only claims scheduled/sending rows, so
+    // retrying a `failed` row without this would no-op as a duplicate.
+    await prisma.email.update({ where: { id: mine.id }, data: { status: "scheduled", error: null } });
     await job.retry();
     res.json({ retried: job.id });
   } catch (err) {

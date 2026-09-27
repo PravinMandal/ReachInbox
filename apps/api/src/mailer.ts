@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import nodemailer, { type Transporter } from "nodemailer";
 import { prisma } from "./db.js";
 import { decryptSecret, encryptSecret } from "./crypto.js";
@@ -7,7 +8,11 @@ import { logger } from "./logger.js";
 const transportCache = new Map<string, Transporter>();
 
 function getTransport(senderId: string, smtpUser: string, smtpPassEnc: string): Transporter {
-  const cached = transportCache.get(senderId);
+  // Key includes a credential fingerprint so SMTP rotations (via API/DB) take
+  // effect without a worker restart; stale entries age out via the cap below.
+  const fp = crypto.createHash("sha1").update(smtpPassEnc).digest("hex").slice(0, 8);
+  const cacheKey = `${senderId}:${fp}`;
+  const cached = transportCache.get(cacheKey);
   if (cached) return cached;
   const t = nodemailer.createTransport({
     host: "smtp.ethereal.email",
@@ -16,7 +21,7 @@ function getTransport(senderId: string, smtpUser: string, smtpPassEnc: string): 
     auth: { user: smtpUser, pass: decryptSecret(smtpPassEnc) },
   });
   if (transportCache.size > 20) transportCache.clear();
-  transportCache.set(senderId, t);
+  transportCache.set(cacheKey, t);
   return t;
 }
 

@@ -14,3 +14,10 @@ sessions/
 .playwright-mcp/
 .vercel
 .env*
+
+# Internal working docs — never submit
+learnings.md
+docs/ACTIONS.md
+docs/ASSUMPTIONS.md
+docs/TRADEOFFS.md
+docs/deployment.md

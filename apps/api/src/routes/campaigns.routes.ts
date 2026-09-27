@@ -1,4 +1,5 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import multer from "multer";
 import sanitizeHtml from "sanitize-html";
 import { extractEmails } from "@reachinbox/shared";
@@ -12,6 +13,12 @@ import { logger } from "../logger.js";
 export const campaignsRouter = Router();
 campaignsRouter.use(authMiddleware);
 
+/**
+ * Scheduling is the most expensive endpoint (bulk inserts + addBulk + ES bulk).
+ * 20 batches/hour per IP is generous for humans, fatal for runaway scripts.
+ */
+const scheduleLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20 });
+
 /** memoryStorage only — serverless has no writable disk. */
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -20,7 +27,7 @@ const upload = multer({
     if (/\.csv$/i.test(file.originalname) || /\.txt$/i.test(file.originalname) || /csv|plain|text|octet/.test(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error("Only .csv / .txt lead files are accepted"));
+      cb(Object.assign(new Error("Only .csv / .txt lead files are accepted"), { status: 400, code: "BAD_FILE" }));
     }
   },
 });
@@ -35,7 +42,7 @@ const MAX_VERCEL = 500;
  * staggered scheduledAt = startAt + i*delaySec → bulk insert (chunks) →
  * addBulk delayed jobs with jobId=email.id → bulk ES index.
  */
-campaignsRouter.post("/schedule", upload.single("leads"), async (req, res, next) => {
+campaignsRouter.post("/schedule", scheduleLimiter, upload.single("leads"), async (req, res, next) => {
   try {
     const userId = req.userId!;
     const subject = String(req.body.subject ?? "").trim();
