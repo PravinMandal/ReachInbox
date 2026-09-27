@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+*.log
+.env
+.env.local
+coverage/
+apps/web/dist/
+apps/api/dist/
+.prisma/
+sessions/
+.vercel/
+.env.live
+.playwright-mcp/

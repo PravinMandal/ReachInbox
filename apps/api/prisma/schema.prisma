@@ -1,0 +1,91 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String      @id @default(cuid())
+  googleId     String?     @unique
+  email        String      @unique
+  name         String
+  avatar       String?
+  passwordHash String?
+  isVerified   Boolean     @default(false)
+  createdAt    DateTime    @default(now())
+  senders      Sender[]
+  slack        SlackToken?
+  batches      Batch[]
+}
+
+model Sender {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fromEmail String
+  smtpUser  String
+  smtpPass  String
+  createdAt DateTime @default(now())
+  emails    Email[]
+
+  @@unique([userId, fromEmail])
+}
+
+model Batch {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  senderId    String
+  subject     String
+  body        String   @db.Text
+  startAt     DateTime
+  delaySec    Int
+  hourlyLimit Int
+  total       Int
+  createdAt   DateTime @default(now())
+  emails      Email[]
+}
+
+enum EmailStatus {
+  scheduled
+  sending
+  sent
+  failed
+}
+
+model Email {
+  id          String      @id @default(cuid())
+  batchId     String
+  batch       Batch       @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  userId      String
+  senderId    String
+  sender      Sender      @relation(fields: [senderId], references: [id])
+  to          String
+  subject     String
+  body        String      @db.Text
+  scheduledAt DateTime
+  sentAt      DateTime?
+  status      EmailStatus @default(scheduled)
+  attempts    Int         @default(0)
+  messageId   String?
+  previewUrl  String?
+  error       String?     @db.Text
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([userId, status, scheduledAt])
+  @@index([userId, status, sentAt])
+  @@index([senderId, status, scheduledAt])
+}
+
+model SlackToken {
+  userId      String   @id
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  botToken    String
+  channelId   String
+  teamId      String?
+  connectedAt DateTime @default(now())
+}

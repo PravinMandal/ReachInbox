@@ -1,0 +1,192 @@
+import { Router } from "express";
+import rateLimit from "express-rate-limit";
+import jwt from "jsonwebtoken";
+import { passwordLoginSchema, registerSchema } from "@reachinbox/shared";
+import { prisma } from "../db.js";
+import {
+  authMiddleware,
+  clearAuthCookie,
+  comparePassword,
+  ensureDevUser,
+  hashPassword,
+  safeUserSelect,
+  setAuthCookie,
+  signToken,
+  signVerifyToken,
+  verifyGoogleIdToken,
+  verifyVerifyToken,
+} from "../auth.js";
+import { env } from "../env.js";
+import { ensureEtherealPool } from "../mailer.js";
+import { sendVerificationMail, verifyMailConfigured } from "../verify-mail.js";
+import { logger } from "../logger.js";
+
+export const authRouter = Router();
+authRouter.use(rateLimit({ windowMs: 60_000, max: 30 }));
+
+function verificationLink(token: string): string {
+  return `${env.FRONTEND_URL.replace(/\/$/, "")}/verify-email?token=${token}`;
+}
+
+authRouter.post("/google", async (req, res, next) => {
+  try {
+    const { idToken } = req.body as { idToken?: string };
+    if (!idToken) return res.status(400).json({ error: { code: "BAD_REQUEST", message: "idToken required" } });
+    if (!env.GOOGLE_CLIENT_ID) {
+      return res.status(500).json({ error: { code: "NOT_CONFIGURED", message: "GOOGLE_CLIENT_ID not set" } });
+    }
+    const g = await verifyGoogleIdToken(idToken);
+    const user = await prisma.user.upsert({
+      where: { googleId: g.googleId },
+      create: { googleId: g.googleId, email: g.email, name: g.name, avatar: g.avatar, isVerified: true },
+      update: { email: g.email, name: g.name, avatar: g.avatar, isVerified: true },
+    });
+    await ensureEtherealPool(user.id, user.email).catch((e) => logger.warn({ e }, "sender pool seed failed"));
+    setAuthCookie(res, signToken(user.id));
+    return res.json({ user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+authRouter.get("/me", async (req, res) => {
+  if (env.DEV_AUTH_BYPASS && process.env.NODE_ENV !== "production") {
+    const stub = await ensureDevUser();
+    if (stub) return res.json({ user: stub, dev: true });
+  }
+  const token =
+    (req.cookies?.token as string | undefined) ??
+    req.headers.authorization?.replace("Bearer ", "");
+  if (!token) return res.status(401).json({ error: { code: "UNAUTHORIZED", message: "Login required" } });
+  try {
+    const decoded = jwt.verify(token, env.JWT_SECRET) as { sub: string };
+    if (decoded.sub === "dev-user") {
+      const stub = await ensureDevUser();
+      return res.json({ user: stub, dev: true });
+    }
+    const user = await prisma.user.findUnique({ where: { id: decoded.sub } });
+    if (!user) return res.status(401).json({ error: { code: "UNAUTHORIZED", message: "Unknown user" } });
+    return res.json({ user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar } });
+  } catch {
+    return res.status(401).json({ error: { code: "UNAUTHORIZED", message: "Invalid session" } });
+  }
+});
+
+authRouter.post("/logout", (_req, res) => {
+  clearAuthCookie(res);
+  res.status(204).end();
+});
+
+/**
+ * Email+password auth (mirrors the MoonSeek project on our stack):
+ * register → verification mail (Gmail OAuth2, reaches real inboxes) →
+ * verify link (15m JWT) → login. Google OAuth flow above is untouched.
+ */
+
+authRouter.post("/register", async (req, res, next) => {
+  try {
+    const parsed = registerSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: { code: "BAD_REQUEST", message: parsed.error.issues[0]?.message ?? "Invalid input" },
+      });
+    }
+    const { name, email, password } = parsed.data;
+    const exists = await prisma.user.findUnique({ where: { email } });
+    if (exists) {
+      return res.status(409).json({ error: { code: "EMAIL_TAKEN", message: "Email already registered" } });
+    }
+    const user = await prisma.user.create({
+      data: { email, name, passwordHash: await hashPassword(password), isVerified: false },
+      select: safeUserSelect,
+    });
+    await ensureEtherealPool(user.id, user.email).catch((e) => logger.warn({ e }, "sender pool seed failed"));
+    try {
+      await sendVerificationMail(user.email, verificationLink(signVerifyToken(user.id)), user.name);
+    } catch (err) {
+      // Don't block register on mail failure (MoonSeek pattern) — resend covers it.
+      logger.warn({ err }, "verification mail failed");
+    }
+    return res.status(201).json({
+      user,
+      message: verifyMailConfigured()
+        ? "Registered. Check your email to verify (link expires in 15 minutes)."
+        : "Registered. Mail service is not configured — ask the admin, then resend verification.",
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+authRouter.post("/login", async (req, res, next) => {
+  try {
+    const parsed = passwordLoginSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: { code: "BAD_REQUEST", message: parsed.error.issues[0]?.message ?? "Invalid input" },
+      });
+    }
+    const { email, password } = parsed.data;
+    // Uniform message either way — no user enumeration.
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user?.passwordHash || !(await comparePassword(password, user.passwordHash))) {
+      return res.status(401).json({ error: { code: "INVALID_CREDENTIALS", message: "Invalid credentials" } });
+    }
+    if (!user.isVerified) {
+      return res.status(403).json({
+        error: { code: "EMAIL_NOT_VERIFIED", message: "Please verify your email before login" },
+      });
+    }
+    setAuthCookie(res, signToken(user.id));
+    return res.json({
+      user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+authRouter.get("/verify-email", async (req, res, next) => {
+  try {
+    const token = String(req.query.token ?? "");
+    if (!token) {
+      return res.status(400).json({ error: { code: "BAD_REQUEST", message: "Token required" } });
+    }
+    let userId: string;
+    try {
+      userId = verifyVerifyToken(token);
+    } catch {
+      return res.status(400).json({ error: { code: "INVALID_TOKEN", message: "Invalid or expired token" } });
+    }
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ error: { code: "NOT_FOUND", message: "User not found" } });
+    if (!user.isVerified) await prisma.user.update({ where: { id: userId }, data: { isVerified: true } });
+    setAuthCookie(res, signToken(userId));
+    const fresh = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: safeUserSelect });
+    return res.json({ user: fresh, message: "Email verified" });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Re-send verification. Always 200 — no enumeration. */
+authRouter.post("/resend-verification", async (req, res, next) => {
+  try {
+    const { email } = req.body as { email?: string };
+    if (typeof email === "string" && email.includes("@")) {
+      const user = await prisma.user.findUnique({ where: { email: email.toLowerCase().trim() } });
+      if (user && !user.isVerified) {
+        try {
+          await sendVerificationMail(user.email, verificationLink(signVerifyToken(user.id)), user.name);
+        } catch (err) {
+          logger.warn({ err }, "resend verification mail failed");
+        }
+      }
+    }
+    return res.json({ message: "If an unverified account exists for that email, a new link is on its way." });
+  } catch (err) {
+    next(err);
+  }
+});
+
+export const authedMe = authMiddleware;

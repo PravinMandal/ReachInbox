@@ -1,0 +1,20 @@
+# Live ($0) worker waker — Vercel Hobby crons are daily-only (sub-daily schedules
+# fail deployment), so an external pinger drives the secret-guarded tick endpoint.
+# Cost: ~860 min/month of the 2000-min private-repo Actions budget. Alternative:
+# cron-job.org @1min hitting the same endpoint (no repo minutes spent).
+name: tick-live-worker
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping live worker tick
+        run: |
+          curl -sS -X POST "${{ secrets.LIVE_API_URL }}/api/worker/tick?limit=25" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --max-time 60

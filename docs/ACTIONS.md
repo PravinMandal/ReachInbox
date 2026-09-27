@@ -1,0 +1,150 @@
+# Actions log (append-only — newest at bottom)
+
+> After a compact, this file tells the next agent what was built, verified, TODO.
+
+## 2026-09-27 — Boot (TS-everywhere, Vercel-free)
+
+- [x] Re-read `problemStatement.md` + all 7 design screenshots + final plan
+  (`/home/pravin/.opencode/plan/plan.md`). Env: node v26.8.1, npm 11, docker 29.7.
+- [x] Created `learnings.md` + `docs/` (ACTIONS/ASSUMPTIONS/TRADEOFFS). Reason:
+  user demanded full traceability + anti-hallucination across compacts.
+- [x] Scaffold monorepo (root, shared TS, api TS, web TS, compose, Vercel configs).
+  `apps/api` typechecks clean (fixed ioredis/pino-http/bull-board type skews).
+- [ ] Apply 4 restart amendments (reason: deep-research review 2026-09-28):
+  1) external pinger instead of Vercel Cron (Hobby daily-only, verified in docs);
+  2) sonner/cva/RHF instead of hand-rolled UI; 3) pinned vitest+supertest;
+  4) pg_trgm fallback-search migration.
+- [ ] Verify: install, prisma generate, `tsc --noEmit` (api+web+shared),
+  `vite build`, `vitest run`, `docker compose up pg/redis/es`, migrate + smoke
+  schedule→send (Ethereal) + restart + rate-limit + search fallback.
+- [ ] Playwright e2e (user connected MCP): login(dev-bypass)→compose→scheduled→
+  sent→search→restart→rate-limit+Slack(mock)→previewUrl. Hunt + fix bugs.
+- [ ] README + demo script. Real OAuth/Slack/DB creds from user at very end —
+  never block build on secrets (placeholders + `DEV_AUTH_BYPASS` local flag).
+
+## 2026-09-28 — Deep-research review (from-scratch audit)
+
+- Verified via web: Vercel Hobby cron daily-only (sub-daily fails deploy) →
+  plan bug fixed to external pinger (GHA */10 `.github/workflows/tick.yml`).
+  Upstash free 500K cmds/mo + Neon free 0.5GB/100CU-h confirmed sufficient.
+- Decision: no restart. Vite SPA, Express, single queue, Prisma, Upstash-TCP,
+  ES+fallback all re-confirmed. Only the 4 amendments above.
+  Why logged: user asked "if we start again, what changes" — answer recorded here
+  to prevent re-litigating stack choices after compacts.
+
+## 2026-09-28 — Email+password auth (MoonSeek pattern) + real identity fix
+
+- User report: logged in but sidebar showed `oliver.brown@domain.io`. Root cause:
+  `DEV_AUTH_BYPASS=true` short-circuited `/me` to the stub. Fix: bypass OFF
+  (real JWT flow); verified sidebar shows the actual account identity.
+- Studied `120-MoonSeek` (mongoose/bcrypt/JWT-verify-mail/Gmail-OAuth2) and ported
+  semantics to our stack: `passwordHash?` + `isVerified` (migration
+  `20260928_password_auth` + backfill Google users verified), `googleId` now
+  nullable; bcryptjs cost 10; verify JWT `{sub, purpose:email_verify}` 15m;
+  Gmail OAuth2 sender (`GMAIL_*` env, Ethereal deliberately NOT used — it never
+  delivers); non-blocking send + `POST /resend-verification` (always 200).
+- Endpoints: `POST /register` (201/409) → `GET /verify-email?token=` (sets cookie)
+  → `POST /login` (401 uniform / 403 unverified) — all under the existing 30/min
+  limiter. Google flow untouched.
+- Frontend: real signin/signup forms (RHF + shared zod), pending-inbox screen,
+  `/verify-email` route with ok/bad states. Fixed RHF `ref` crash (`Input` is now
+  `forwardRef`) and a stale-vite red herring on the new route.
+- Verified end-to-end in-browser: signup → pending → verify → dashboard shows
+  `Real User / realuser@ex.io`; curl matrix 201/409/403/401/verify/login/me.
+
+## 2026-09-28 — Sidebar/header polish (user screenshots)
+
+- Brand moved to navbar (header, all sizes; removed from sidebar body). Logo mark
+  is `#E0E0E2` (dark-surface design) → wrapped in a dark brand tile so it is
+  crisp in both themes. Verified via light screenshot.
+- Settings pinned to sidebar bottom (`mt-auto` group). Queues stays under CORE.
+- Fixed double-highlight: NavLink matches pathname only, so `/?tab=scheduled`
+  and `/?tab=sent` were BOTH active. Active state now computed from
+  `useLocation + useSearchParams` — verified lit-only-active on both tabs.
+
+- Agreed with user: no roles exist (everyone is admin of their own account), so
+  the queue dashboard belongs in-app, not a new tab. Built `/queues`: live
+  counts, per-state tabs, per-user job rows (jobId=email.id filtered by userId),
+  retry for failed, 3s polling; API `GET /worker/jobs`, `POST /jobs/:id/retry`
+  (ownership-checked), extended `/status`. bull-board stays mounted for advanced
+  debugging (spec's "live BullMQ dashboard" satisfied twice).
+- Theme toggle now a View-Transitions circle wipe from the click point
+  (`--tx/--ty` + `theme-wipe` keyframes; instant fallback + reduced-motion off).
+  Verified flipping both ways, 0 errors; dark Queues screenshot reviewed.
+- [x] Re-scan: `tsc` ×3 clean; jobs endpoint scoped (bogus state→delayed,
+  foreign retry→404); 30 completed rows render; counts live.
+
+## 2026-09-28 — UI correctness pass (user bug reports, all fair)
+
+- [x] Login card centered (`min-h-screen grid place-items-center`). Why: it
+  rendered top-left — LoginPage had no centering wrapper.
+- [x] Real TipTap editor (B/I/U/S, headings, align, lists, quote, code, link,
+  undo/redo) replacing static toolbar. Backend sanitize allowlist + `html` MIME
+  part (+ text fallback); detail renders formatted HTML. Why: static icons were
+  dishonest UI — every visible control must work.
+- [x] `AppShell`: top header with theme toggle + logout icon buttons; removed text
+  buttons from sidebar. Sidebar: REACHINBOX logo (real SVG vendored to
+  `public/logo.svg`, also favicon). Mobile drawer + responsive paddings/stack.
+  Why: user review + spec §dashboard. (Queues link later became in-app `/queues`.)
+- [ ] Re-verify all (below).
+  - [x] Re-scan (Playwright, 0 console/page errors): login centered (measured),
+    header toggle+logout icons, REACHINBOX logo + Queues link, bold→`<strong>` +
+    list→`<ul>`, CSV count hint, RHF validation, formatted campaign → HTML stored
+    (`<em>` intact) + sent + previewUrl, detail renders `<em>`, XSS probe
+    (script/onclick stripped, safe link kept), mobile 390px drawer, search,
+    dark/light both ways. `tsc` ×3 + `vite build` green.
+
+- [x] `.github/workflows/tick.yml` (GHA */10 external pinger). Why: Hobby cron
+  daily-only, verified in Vercel docs.
+- [x] UI libs: `sonner` + `cva`/`clsx`/`tailwind-merge` + `react-hook-form`/`resolvers`;
+  deleted hand-rolled `Toast.tsx`; RHF+zod Compose; cva Button. Why: user "use
+  libraries, no clutter" instruction.
+- [x] Pinned `vitest` (+`supertest`): shared 5 tests + api 3 tests pass.
+- [x] `tsc --noEmit` clean (shared/api/web) + `vite build` ok (fixed RHF
+  input/output generics, `vite/client` types).
+- [ ] Infra: `docker compose up -d postgres redis elasticsearch` → migrate (+pg_trgm).
+  - [x] Infra up (sudo needed — user gave password; group fix deferred). Init
+    migration applied; bogus auto `DROP INDEX` migration removed via
+    `migrate reset` (raw-SQL drift lesson → `db:setup` script instead).
+  - [x] `db:setup` (pg_trgm + 2 GIN indexes) done. `pino-pretty` added (logger
+    assumed it). Dev Ethereal pool seeded (2 senders).
+  - [x] Bugs found+fixed: BullMQ 5.81 rejects `:` in queue names → `email-send`
+    (plan/docs updated); ES `null_value:"NULL"` invalid on dates → dropped;
+    `ensureIndex` boot race → retry+backoff; auto-created wrong mapping
+    (userId:text) → deleted, recreated keyword, reindexed.
+  - [x] Smoke: 5 scheduled → 5 sent with real previewUrls; ES search `es/5`.
+    Verified Ethereal API dedupes rapid test accounts (documented, acceptable).
+- [ ] Boot api+worker, smoke: schedule→send (Ethereal), restart, rate-limit, search.
+- [ ] Playwright e2e full pass, bug hunt + fixes.
+  - [x] Playwright MCP e2e (0 console errors): inbox tabs/counts (Scheduled 2,
+    Sent 13), compose RHF + CSV count hint + inline validation + sonner toast +
+    redirect, detail delivery + previewUrl, settings/Slack, search filters,
+    login page, dark/light toggle. Fixed: favicon 404.
+  - [x] Backend e2e: limiter Δ≈2s (processedOn), cap-2/hr → delay-to-next-hour +
+    rollover fire, node restart + redis restart → exactly-once sends,
+    ES + trigram fallback, bull-board 200, bulk-schedule JSON path (10/10).
+  - Bugs fixed this session: queue colon rename, ES null_value, ensureIndex race,
+    wrong auto-mapping + reindex, pino-pretty dep, Ethereal dedupe doc, worker
+    `delayed` event log.
+- [x] README + `docs/DEMO.md` video script. Real OAuth/Slack/DB creds from user
+  at very end — Slack live-notify is the one unverified live call (silent-skip
+  verified); demo video covers it once creds land.
+
+## 2026-09-28 — Live-backend prep + deployment handoff
+
+- Upstash URL (user-supplied) tested from here: PING + exact Lua quota + streams
+  + SETNX. First attempt failed on my explicit `tls:{}` + short timeout; plain
+  URL-parsed TLS + 15s timeout connects. Stored in `.env.live` (gitignored, 600;
+  had to quote values — raw `&` breaks shell sourcing).
+- Moodify Redis is dead (DNS NXDOMAIN) — discarded. No Upstash anywhere else.
+- SellStuffs Neon works; created isolated `reachinbox` DB; `migrate deploy` +
+  `db:setup` (pg_trgm) applied to live. Deploy agent must NOT re-run `migrate dev`.
+- Wrote `docs/deployment.md` (no secrets — locations only) for the deploy agent
+  holding Vercel+GitHub creds: read-order, GitHub+collaborators, two Vercel
+  projects, env tables, verify checklist, hard constraints.
+
+## Conventions
+
+- Every entry: `[date] what + why + verify + result`.
+- Re-read on resume: `learnings.md`, this file, ASSUMPTIONS, TRADEOFFS, plan.md,
+  problemStatement.md.

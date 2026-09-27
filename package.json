@@ -1,0 +1,27 @@
+{
+  "name": "reachinbox",
+  "private": true,
+  "version": "1.0.0",
+  "description": "ReachInbox hiring assignment — production-grade email scheduler (Express + BullMQ + Postgres + ES + Vite React+TS)",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:infra": "docker compose up -d postgres redis elasticsearch",
+    "dev:api": "npm --workspace apps/api run dev",
+    "dev:worker": "npm --workspace apps/api run worker:dev",
+    "dev:web": "npm --workspace apps/web run dev",
+    "install:all": "npm install",
+    "db:migrate": "npm --workspace apps/api run db:migrate",
+    "db:seed": "npm --workspace apps/api run db:seed",
+    "build": "npm --workspace packages/shared run build && npm --workspace apps/api run build && npm --workspace apps/web run build",
+    "typecheck": "npm --workspace packages/shared run typecheck && npm --workspace apps/api run typecheck && npm --workspace apps/web run typecheck",
+    "test": "npm --workspace packages/shared run test && npm --workspace apps/api run test",
+    "typecheck": "npm --workspace packages/shared run typecheck && npm --workspace apps/api run typecheck && npm --workspace apps/web run typecheck",
+    "reindex": "npm --workspace apps/api run reindex"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
