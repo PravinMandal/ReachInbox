@@ -238,6 +238,19 @@
   `/google` (GIS legacy) and `/google/callback`. Verified: tsc + tests green,
   deployed, health green. User's click is the final proof.
 
+## 2026-09-28 — The real root cause: cross-site session cookie (two successes!)
+
+- Logs proved the callback SUCCEEDED twice (session cookie issued, success
+  redirect) — yet the app's immediate `/me` got 401 both times: the cookie
+  never came back. Two `vercel.app` subdomains are cross-site (public suffix);
+  Brave/Chrome drop the session cookie on the XHR. Localhost ports are
+  same-site — the full local-vs-live explanation.
+- Fix: `vercel.web.json` proxies `/api/*` to the api deployment;
+  `VITE_API_URL` = web origin (same-origin cookies, first-party set+send).
+  No api change needed. Verified: proxy health 200; probe-JWT roundtrip
+  (`Unknown user` = cookie traveled + signature verified); bundle has 1
+  same-origin ref, 0 direct-api refs, 0 GIS refs.
+
 ## Conventions
 
 - Every entry: `[date] what + why + verify + result`.
