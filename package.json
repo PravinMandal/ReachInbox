@@ -23,6 +23,6 @@
     "reindex": "npm --workspace apps/api run reindex"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=20"
   }
 }
