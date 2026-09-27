@@ -200,6 +200,25 @@
   respond properly, user's Brave was already reaching the API (`/me` 401
   pre-login as expected).
 
+## 2026-09-28 — Google login via server redirect (GIS popup abandoned)
+
+- Why: GIS button iframe stayed 0x0 in every browser with zero backend contact
+  (inline placeholder visible, clicks dead). Origin entry verified correct on
+  the right client, no CSP, React 18, lib current — root cause unprovable
+  remotely, so replaced the mechanism instead of the config.
+- New flow: `GET /api/auth/google/url` (state cookie + auth URL) → Google →
+  `GET /api/auth/google/callback` (state check, code exchange, same
+  verify/upsert/cookie as before, 302 to `/?login=google`) → inbox toast.
+  Frontend GIS button/provider removed (`@react-oauth/google` uninstalled);
+  plain redirect button instead. Legacy `POST /api/auth/google` kept.
+- Env: new `GOOGLE_REDIRECT_URI` (`.env.example` + local `.env` + Vercel api).
+  Verified: `/google/url` well-formed; Google answers `redirect_uri_mismatch`
+  naming exactly `https://reachinbox-api.vercel.app/api/auth/google/callback`
+  — expected until the user registers it.
+- [ ] USER: console → Authorized redirect URIs → add
+  `https://reachinbox-api.vercel.app/api/auth/google/callback` → Save →
+  wait ~5min → click Sign in with Google.
+
 ## Conventions
 
 - Every entry: `[date] what + why + verify + result`.
