@@ -219,6 +219,15 @@
   `https://reachinbox-api.vercel.app/api/auth/google/callback` → Save →
   wait ~5min → click Sign in with Google.
 
+## 2026-09-28 — OAuth state un-cookie'd (callback 302'd to google_failed)
+
+- Logs showed the return navigation from Google arrives with NO `oauth_state`
+  cookie (Brave drops cookies set in the third-party XHR that minted the auth
+  URL — present on later XHRs, absent on top-level return). State check failed
+  every time. Replaced with short-lived signed-JWT state (10m, purpose-bound);
+  safe here because the code (not the state) determines the account and codes
+  are single-use. No console change needed — user just retries.
+
 ## Conventions
 
 - Every entry: `[date] what + why + verify + result`.
