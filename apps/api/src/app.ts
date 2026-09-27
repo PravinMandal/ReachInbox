@@ -5,6 +5,11 @@ import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 import { createBullBoard } from "@bull-board/api";
 import { BullMQAdapter } from "@bull-board/api/bullMQAdapter.js";
+// Static JSON import: @bull-board/api locates its UI at runtime through an
+// eval'd require.resolve('@bull-board/ui/package.json'), which serverless
+// file-tracers cannot see. This import forces the file into the bundle.
+import uiPackageJson from "@bull-board/ui/package.json" with { type: "json" };
+void uiPackageJson;
 import { ExpressAdapter } from "@bull-board/express";
 import { env } from "./env.js";
 import { logger } from "./logger.js";
