@@ -251,6 +251,19 @@
   (`Unknown user` = cookie traveled + signature verified); bundle has 1
   same-origin ref, 0 direct-api refs, 0 GIS refs.
 
+## 2026-09-28 — Correction: callback itself must live behind the web domain
+
+- The proxy fixed cookie READS, but Google calls the api back directly, so the
+  session cookie was still WRITTEN on the api host — `/me` kept 401ing
+  (proven: extension cookies arrived, ours never stored). Fix:
+  `GOOGLE_REDIRECT_URI` =
+  `https://reachinbox-web-five.vercel.app/api/auth/google/callback`
+  (proxied to the same handler, zero code change) → cookie binds to web-five
+  on write AND read. Verified new URL + state; Google says mismatch until
+  registered (expected).
+- [ ] USER (last console edit, keep the old URI too — harmless): add the
+  web-five callback URI above to Authorized redirect URIs → Save → retry.
+
 ## Conventions
 
 - Every entry: `[date] what + why + verify + result`.
