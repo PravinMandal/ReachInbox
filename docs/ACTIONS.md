@@ -186,6 +186,20 @@
 - [ ] USER (browser pass, needs Google click): login → compose 5 → scheduled →
   sent (after waker fires) → search → `/queues` live.
 
+## 2026-09-28 — Auth fixes (live sign-in/Google/verification)
+
+- Root causes (all three reported symptoms): (1) SPA had no fallback rewrite,
+  so `/login`, `/verify-email`, etc. returned Vercel 404 — fixed with
+  `vercel.web.json` rewrite `/(.*) → /`, redeployed, all routes 200.
+  (2) Gmail refresh token dead (`invalid_grant` on direct refresh test) — user
+  regenerated via OAuth Playground; new token set on api env + local
+  `apps/api/.env` synced, refresh re-tested OK, api redeployed.
+  (3) Google button: backend IDs match; user added the live origin in the
+  Google console. Awaiting user browser retest.
+- Backend was never broken: CORS/cookies correct, login + Google endpoints
+  respond properly, user's Brave was already reaching the API (`/me` 401
+  pre-login as expected).
+
 ## Conventions
 
 - Every entry: `[date] what + why + verify + result`.
