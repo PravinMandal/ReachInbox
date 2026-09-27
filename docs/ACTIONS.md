@@ -228,6 +228,16 @@
   safe here because the code (not the state) determines the account and codes
   are single-use. No console change needed — user just retries.
 
+## 2026-09-28 — Google login P2002: link, don't duplicate (the local-vs-live clue)
+
+- Live callback died with `Unique constraint failed on (email)`: the user
+  already owned that email via password signup, so the googleId upsert tried
+  a duplicate create. Locally no conflicting row existed — hence "works
+  locally". New `linkGoogleUser()` (auth.ts): upsert by googleId, on P2002
+  attach the Google identity to the existing email row. Applied to both
+  `/google` (GIS legacy) and `/google/callback`. Verified: tsc + tests green,
+  deployed, health green. User's click is the final proof.
+
 ## Conventions
 
 - Every entry: `[date] what + why + verify + result`.
