@@ -143,6 +143,49 @@
   holding Vercel+GitHub creds: read-order, GitHub+collaborators, two Vercel
   projects, env tables, verify checklist, hard constraints.
 
+## 2026-09-28 — Live deploy (GitHub + Vercel, $0)
+
+- [x] Local git init + 8 clean commits, pushed to private `PravinMandal/ReachInbox`
+  (branch `master`). Verified no `.env*` tracked (only `.env.example` files).
+  Playwright debug dumps excluded via `.gitignore`.
+- [x] Invited `Mitrajit` + `Yadav036` (push) — both invites pending acceptance.
+- [x] Fixed `.github/workflows/tick.yml` auth header (`Bearer *** ...` →
+  `Bearer ${{ secrets.CRON_SECRET }}`); was dead on arrival otherwise.
+- [x] Vercel projects (Hobby team, CLI-deployed, unlinked to git — pushes do NOT
+  auto-deploy; redeploy via `vercel --prod --local-config vercel.{api,web}.json`):
+  `reachinbox-api` → `https://reachinbox-api.vercel.app`,
+  `reachinbox-web` → `https://reachinbox-web-five.vercel.app`
+  (bare `reachinbox-web` alias taken by another account).
+- [x] API env per deployment.md §3 (values from `.env.live` + `apps/api/.env`);
+  `ES_NODE` omitted (fallback by design), `DEV_AUTH_BYPASS` never set.
+  `CRON_SECRET` generated (`openssl rand -hex 32`), also stored as GH secret.
+  `GOOGLE_CLIENT_ID` == `VITE_GOOGLE_CLIENT_ID` verified (match).
+- Deviations from `docs/deployment.md` (deploy-driven, no product-code refactors):
+  1) root `postinstall` (shared build + `prisma generate`) — legacy `builds`
+     ignore the project's custom installCommand, so the generated client was
+     missing at runtime (`@prisma/client did not initialize yet`).
+  2) `sanitize-html` pinned `2.12.1` (htmlparser2 v8, CJS) — v2.17 pulls
+     ESM-only htmlparser2@12 and Vercel's launcher cannot `require(esm)`
+     (Node>=22 bump attempted first, reverted — did not help). Verified
+     locally: tsc + vitest + XSS-strip smoke.
+  3) explicit `@bull-board/ui` dep + static `package.json` import in `app.ts` —
+     `@bull-board/api` resolves it via eval'd `require.resolve`, invisible to
+     the serverless file tracer (`Cannot find module '@bull-board/ui/...'`).
+  4) Added `.vercelignore` (keeps local `.env*` out of CLI uploads).
+- [x] Verify: `/api/health` → `{"ok":true,"db":"up","redis":"up","es":"down",
+  "esDegraded":true}`; tick without secret → `UNAUTHORIZED`, with secret →
+  `{"processed":0,"sent":0,"delayed":0}`; web 200 with API URL + GIS baked in.
+- [x] GH Actions secrets `LIVE_API_URL` + `CRON_SECRET` set.
+- [ ] BLOCKED: Actions cannot run — account billing flag ("payments have failed
+  or spending limit needs increase", run 36336724235 never started). Waker
+  works (tick verified by curl) but needs a runner: fix billing, make the repo
+  public (unlimited free minutes), or point cron-job.org @1min at
+  `POST {API}/api/worker/tick?limit=25` with `Authorization: Bearer <CRON_SECRET>`.
+- [ ] USER: Google console add origin `https://reachinbox-web-five.vercel.app`;
+  Slack console confirm redirect `https://reachinbox-api.vercel.app/api/slack/callback`.
+- [ ] USER (browser pass, needs Google click): login → compose 5 → scheduled →
+  sent (after waker fires) → search → `/queues` live.
+
 ## Conventions
 
 - Every entry: `[date] what + why + verify + result`.
