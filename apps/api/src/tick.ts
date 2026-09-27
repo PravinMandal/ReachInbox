@@ -2,6 +2,7 @@ import { prisma } from "./db.js";
 import { env } from "./env.js";
 import { logger } from "./logger.js";
 import { redis } from "./redis.js";
+import { emailQueue } from "./queue.js";
 import { processOne } from "./processor.js";
 
 // Live (Vercel) driver. Hobby has no persistent worker and its crons are
@@ -43,6 +44,16 @@ export async function runTick(limit = 25): Promise<{ processed: number; sent: nu
       });
       if (out.outcome === "sent") sent++;
       if (out.outcome === "delayed") delayed++;
+      // No persistent worker exists here, so nothing will ever transition this
+      // BullMQ job again — drop it so bull-board doesn't show stale `waiting`
+      // rows forever. Truth lives in Postgres (reconciler/retry re-add by
+      // email id if ever needed); the /queues page already reads DB truth.
+      if (out.outcome !== "duplicate") {
+        await emailQueue
+          .getJob(id)
+          .then((job) => job?.remove().catch(() => undefined))
+          .catch(() => undefined);
+      }
     } catch (err) {
       logger.warn({ err, id }, "tick processOne failed");
     }
