@@ -135,7 +135,12 @@ export async function processOne(
     return { outcome: "sent" };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    const transient = /timeout|temporar|econn|eai_again|rate|421|451|4\d\d/i.test(message);
+    // Transient = worth retrying with backoff: timeouts, connection resets,
+    // DNS blips, and 4xx codes that signal "try again later" (421, 450, 451,
+    // 452). Everything else — 5xx, and esp. 535 auth failures — is permanent:
+    // the old /4\d\d/ also matched 535, so bad credentials retried for hours
+    // burning quota instead of failing visibly into the Sent tab.
+    const transient = /timeout|temporar|econn|eai_again|421|450|451|452/i.test(message);
     if (transient) {
       // Back to `scheduled` — BullMQ backoff retries the same jobId. Quota
       // stays consumed (fail-closed): we attempted a send this hour.
