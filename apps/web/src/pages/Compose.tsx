@@ -100,10 +100,18 @@ export function ComposePage() {
         setError("body", { message: "Body is required" });
         throw new Error("Body is required");
       }
+      // datetime-local gives a naive local string; guard the conversion so a
+      // stale/empty value becomes a field error, not a TypeError thrown out
+      // of the mutation ("Invalid time value" toast, no server 400 path).
+      const startDate = new Date(v.startAt);
+      if (Number.isNaN(startDate.getTime())) {
+        setError("startAt", { message: "Start time must be a valid date" });
+        throw new Error("Start time must be a valid date");
+      }
       const fd = new FormData();
       fd.append("subject", v.subject);
       fd.append("body", v.body);
-      fd.append("startAt", new Date(v.startAt).toISOString());
+      fd.append("startAt", startDate.toISOString());
       fd.append("delaySec", String(v.delaySec));
       fd.append("hourlyLimit", String(v.hourlyLimit));
       if (v.from) fd.append("from", v.from);
