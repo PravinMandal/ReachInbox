@@ -7,6 +7,7 @@ import { prisma } from "../db.js";
 import { authMiddleware } from "../auth.js";
 import { emailQueue } from "../queue.js";
 import { indexMany } from "../es.js";
+import { runTick } from "../tick.js";
 import { env, isVercel } from "../env.js";
 import { logger } from "../logger.js";
 
@@ -180,6 +181,22 @@ campaignsRouter.post("/schedule", scheduleLimiter, upload.single("leads"), async
     const effectiveCap = Math.min(env.MAX_EMAILS_PER_HOUR_GLOBAL, hourlyLimit);
     const estimatedHours = Math.max(1, Math.ceil(persisted.length / effectiveCap));
 
+    // Serverless has no persistent worker: without this, a just-scheduled
+    // email waits for the next external tick (up to minutes). Drain a few due
+    // rows inline so small batches send before the response returns.
+    // Capped at 3 (Ethereal ~1-3s each) to stay inside Hobby function limits;
+    // the waker picks up the rest. Local Docker has a real worker — skip.
+    // Never fails the schedule response.
+    let instantSent = 0;
+    if (isVercel && persisted.length > 0) {
+      try {
+        const tick = await runTick(Math.min(3, persisted.length));
+        instantSent = tick.sent;
+      } catch (e) {
+        logger.warn({ e }, "inline drain failed (non-fatal) — waker covers it");
+      }
+    }
+
     res.status(201).json({
       batchId: batch.id,
       total: persisted.length,
@@ -187,10 +204,13 @@ campaignsRouter.post("/schedule", scheduleLimiter, upload.single("leads"), async
       firstAt,
       lastAt,
       estimatedHours,
+      instantSent,
       note:
-        persisted.length > effectiveCap
-          ? `Scheduled across ~${estimatedHours}h due to hourly caps (best-effort order).`
-          : "Scheduled.",
+        instantSent > 0
+          ? `${instantSent} sent instantly; the rest follow via the worker.`
+          : persisted.length > effectiveCap
+            ? `Scheduled across ~${estimatedHours}h due to hourly caps (best-effort order).`
+            : "Scheduled.",
     });
   } catch (err) {
     next(err);

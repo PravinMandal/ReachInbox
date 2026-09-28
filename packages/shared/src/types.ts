@@ -51,6 +51,8 @@ export interface ScheduleResult {
   firstAt: string;
   lastAt: string;
   estimatedHours: number;
+  /** Live only: rows already sent inline during the schedule call. */
+  instantSent?: number;
   note: string;
 }
 
