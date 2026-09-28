@@ -181,11 +181,14 @@ skeletons/empty/error states, Tailwind `class` dark mode.
   Env: Neon URL (pooler), Upstash TCP URL, `ES_NODE` (Bonsai or empty), OAuth/Slack,
   `FRONTEND_URL` (cookie `SameSite=None;Secure` in prod), `CRON_SECRET`.
 - **Waker (live only; repo contains zero cron schedules by spec):** external pinger —
-  cron-job.org @5min (free, recommended) or a 5-minute poller hitting
-  `POST {API}/api/worker/tick?limit=25` with `Authorization: Bearer *** manual Actions run
-  (`.github/workflows/tick.yml`, `workflow_dispatch` only) also works.
+  cron-job.org @1min (free) or a 1-minute poller hitting
+  `POST {API}/api/worker/tick?limit=25` with `Authorization: Bearer <CRON_SECRET>`.
+  Small batches don't even wait for it: the schedule endpoint drains the first
+  few due rows inline (Vercel-only, Hobby-budget-capped) and reports
+  `instantSent`. Manual Actions run (`.github/workflows/tick.yml`,
+  `workflow_dispatch` only) also works.
 - **Not Vercel Cron**: Hobby is daily-only (sub-daily fails deployment — verified).
-- Live limits: ~500/batch, 4MB uploads (Vercel 10s/4.5MB), ~5min timing granularity.
+- Live limits: ~500/batch, 4MB uploads (Vercel 10s/4.5MB), ~1min timing granularity (instant for the first few).
 
 ## 9. Assumptions, shortcuts, tradeoffs
 
