@@ -8,6 +8,7 @@ import { compensateQuota, tryReserveQuota } from "./ratelimit.js";
 import { notifyRateLimitOnce } from "./slack.js";
 import type { SendJobData } from "./queue.js";
 import {
+  batchQuotaKey,
   globalQuotaKey,
   hourBucketUTC,
   msUntilNextHourEnd,
@@ -38,7 +39,7 @@ export async function processOne(
 ): Promise<ProcessOutcome> {
   const email = await prisma.email.findUnique({
     where: { id: emailId },
-    include: { batch: { select: { hourlyLimit: true } }, sender: { select: { fromEmail: true } } },
+    include: { batch: { select: { id: true, hourlyLimit: true } }, sender: { select: { fromEmail: true } } },
   });
   if (!email) {
     logger.warn({ emailId }, "job for missing email — treating as failed");
@@ -47,12 +48,17 @@ export async function processOne(
   if (email.status === "sent") return { outcome: "duplicate" };
 
   const bucket = hourBucketUTC();
-  const senderCap = email.batch?.hourlyLimit ?? env.MAX_EMAILS_PER_HOUR_GLOBAL;
+  const batchCap = email.batch?.hourlyLimit ?? env.MAX_EMAILS_PER_HOUR_GLOBAL;
+  // Quota is per-BATCH: each campaign gets a fresh hourly budget, so a new
+  // batch sends instantly even if an earlier batch spent its allowance.
+  // The global cap is the only cross-batch guardrail.
   const verdict = await tryReserveQuota(
     globalQuotaKey(bucket),
     senderQuotaKey(email.senderId, bucket),
+    batchQuotaKey(email.batchId, bucket),
     env.MAX_EMAILS_PER_HOUR_GLOBAL,
-    senderCap,
+    env.MAX_EMAILS_PER_HOUR_GLOBAL,
+    batchCap,
   );
 
   if (verdict === "limited") {
@@ -68,8 +74,8 @@ export async function processOne(
       senderId: email.senderId,
       fromEmail: email.sender.fromEmail,
       hourBucket: bucket,
-      sent: senderCap,
-      cap: senderCap,
+      sent: batchCap,
+      cap: batchCap,
       delayed: 1,
     }).catch(() => undefined);
 
@@ -86,7 +92,7 @@ export async function processOne(
   if (claimed.count === 0) {
     // Lost the race (already sent/failed by a concurrent attempt) — give the
     // quota slot back and stop. Never send twice.
-    await compensateQuota(globalQuotaKey(bucket), senderQuotaKey(email.senderId, bucket));
+    await compensateQuota(globalQuotaKey(bucket), senderQuotaKey(email.senderId, bucket), batchQuotaKey(email.batchId, bucket));
     return { outcome: "duplicate" };
   }
 
