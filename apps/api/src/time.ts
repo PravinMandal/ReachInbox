@@ -37,12 +37,6 @@ export function senderQuotaKey(senderId: string, bucket: string): string {
   return `ratelimit:sender:${senderId}:${bucket}`;
 }
 
-/** Per-batch quota: each campaign gets its own hourly budget so a fresh
- * batch never inherits an earlier batch's spent allowance. */
-export function batchQuotaKey(batchId: string, bucket: string): string {
-  return `ratelimit:batch:${batchId}:${bucket}`;
-}
-
 export function slackNotifiedKey(senderId: string, bucket: string): string {
   return `slack:notified:${senderId}:${bucket}`;
 }

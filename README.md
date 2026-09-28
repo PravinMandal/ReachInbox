@@ -100,11 +100,12 @@ bulk-indexes to ES. Attempts: 3, exponential backoff.
 
 **Throttling (two layers).** Staggered delays (primary, preserves order) + BullMQ
 `limiter {max:1, duration:MIN_GAP_MS}` (global 2s floor, Redis-backed, cross-worker).
-Hourly quotas (global + per-sender safety net + per-batch) via one Lua `check-and-incr`
-(atomic, TTL 3700). **Each campaign gets a fresh per-batch budget** — a new batch
-sends instantly even if an earlier batch spent its allowance; the global cap
-(`MAX_EMAILS_PER_HOUR_GLOBAL`) is the only cross-batch guardrail, so true floods
-still can't overshoot the provider.
+Hourly quotas (global + per-sender, spec §Rate Limiting) via one Lua `check-and-incr`
+(atomic, TTL 3700, keyed `hour_window + sender`). **One shared budget per sender
+per hour across ALL campaigns** — a campaign's `hourlyLimit` picks the tightest
+applicable cap for its rows, never a fresh budget. A new batch with a low cap
+still waits if the sender's hour is spent; raise the cap to send more. The
+global cap (`MAX_EMAILS_PER_HOUR_GLOBAL`) guards the provider overall.
 
 **Send pipeline** (`processOne`, shared by worker + tick): load → `sent`=dup-ok →
 Lua reserve (**LIMITED → DB untouched**, reschedule `msUntilNextHour + index·gap + jitter`,

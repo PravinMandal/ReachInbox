@@ -8,7 +8,6 @@ import { compensateQuota, tryReserveQuota } from "./ratelimit.js";
 import { notifyRateLimitOnce } from "./slack.js";
 import type { SendJobData } from "./queue.js";
 import {
-  batchQuotaKey,
   globalQuotaKey,
   hourBucketUTC,
   msUntilNextHourEnd,
@@ -48,17 +47,17 @@ export async function processOne(
   if (email.status === "sent") return { outcome: "duplicate" };
 
   const bucket = hourBucketUTC();
-  const batchCap = email.batch?.hourlyLimit ?? env.MAX_EMAILS_PER_HOUR_GLOBAL;
-  // Quota is per-BATCH: each campaign gets a fresh hourly budget, so a new
-  // batch sends instantly even if an earlier batch spent its allowance.
-  // The global cap is the only cross-batch guardrail.
+  // Spec §Rate Limiting: the hourly cap is per-SENDER (keyed hour_window +
+  // sender), shared across ALL of that sender's batches. A campaign's
+  // `hourlyLimit` field selects the tightest applicable cap for its rows —
+  // it does not grant a fresh budget. A new batch with a low cap still
+  // waits if the sender's hour is spent; raise the cap to send more.
+  const senderCap = email.batch?.hourlyLimit ?? env.MAX_EMAILS_PER_HOUR_GLOBAL;
   const verdict = await tryReserveQuota(
     globalQuotaKey(bucket),
     senderQuotaKey(email.senderId, bucket),
-    batchQuotaKey(email.batchId, bucket),
     env.MAX_EMAILS_PER_HOUR_GLOBAL,
-    env.MAX_EMAILS_PER_HOUR_GLOBAL,
-    batchCap,
+    senderCap,
   );
 
   if (verdict === "limited") {
@@ -74,8 +73,8 @@ export async function processOne(
       senderId: email.senderId,
       fromEmail: email.sender.fromEmail,
       hourBucket: bucket,
-      sent: batchCap,
-      cap: batchCap,
+      sent: senderCap,
+      cap: senderCap,
       delayed: 1,
     }).catch(() => undefined);
 
@@ -88,7 +87,7 @@ export async function processOne(
         where: { id: emailId },
         data: {
           error:
-            `Delayed by hourly cap ${batchCap}/hr — first due ` +
+            `Delayed by hourly cap ${senderCap}/hr — first due ` +
             `${email.scheduledAt.toISOString()}, now fires ${new Date(Date.now() + delayMs).toISOString()}.`,
         },
       })
@@ -105,7 +104,7 @@ export async function processOne(
   if (claimed.count === 0) {
     // Lost the race (already sent/failed by a concurrent attempt) — give the
     // quota slot back and stop. Never send twice.
-    await compensateQuota(globalQuotaKey(bucket), senderQuotaKey(email.senderId, bucket), batchQuotaKey(email.batchId, bucket));
+    await compensateQuota(globalQuotaKey(bucket), senderQuotaKey(email.senderId, bucket));
     return { outcome: "duplicate" };
   }
 
