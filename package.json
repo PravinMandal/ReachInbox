@@ -19,7 +19,8 @@
     "build": "npm --workspace packages/shared run build && npm --workspace apps/api run build && npm --workspace apps/web run build",
     "typecheck": "npm --workspace packages/shared run typecheck && npm --workspace apps/api run typecheck && npm --workspace apps/web run typecheck",
     "test": "npm --workspace packages/shared run test && npm --workspace apps/api run test",
-    "reindex": "npm --workspace apps/api run reindex"
+    "reindex": "npm --workspace apps/api run reindex",
+    "bulk-schedule": "npm --workspace apps/api run bulk-schedule"
   },
   "engines": {
     "node": ">=20"

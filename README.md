@@ -30,6 +30,13 @@ Queue dashboard: in-app `/queues` (sidebar → Queues: live email-truth counts, 
 per-user job rows, retry) + advanced `localhost:4000/admin/queues` (bull-board, login-gated;
 live works via same-origin `/admin` proxy on the web host).
 
+**Ethereal Email — zero manual setup.** No account creation, no SMTP config:
+`nodemailer.createTestAccount()` mints a fake-SMTP inbox automatically on first
+login/register (`ensureEtherealPool`, `ETHEREAL_POOL_SIZE=2` senders per user).
+Every sent email stores Ethereal's `previewUrl` — open it from the email detail
+page (Delivery → Ethereal → Open preview) to see the rendered message. Nothing
+is ever really delivered (Ethereal is a test sink by design).
+
 `DEV_AUTH_BYPASS=true` (local only, never prod) lets you click through the UI
 without Google creds. Real login needs `GOOGLE_CLIENT_ID` + `VITE_GOOGLE_CLIENT_ID`.
 
@@ -45,7 +52,7 @@ without Google creds. Real login needs `GOOGLE_CLIENT_ID` + `VITE_GOOGLE_CLIENT_
 | Restart (Redis+node, AOF replay) | ✅ sent once |
 | ES search | ✅ `source:es`; fallback with ES stopped → `source:db-fallback` (trigram-ranked) |
 | bull-board + native `/queues` | ✅ 200 + 30 rows render, scoped to caller |
-| Frontend (Playwright, 0 console errors) | ✅ inbox tabs/counts, compose RHF+CSV count+toast, detail, settings, search, dark mode, login |
+| Frontend (Playwright) | ✅ inbox tabs/counts, compose RHF+CSV count+toast, detail, settings, search, dark mode, login, star toggle, delete+confirm |
 | Unit tests (`vitest`) | ✅ shared + api pass; `tsc` clean ×3, `vite build` ok |
 | HTTP contract (`supertest`) | ✅ health/validation/authz matrix, no infra mocks |
 | Failed → retry → sent | ✅ 535-auth fail, retry re-attempts, creds restored → sent + preview |
@@ -120,19 +127,41 @@ verified). Both set the same 7-day JWT cookie.
 stores encrypted bot token → `chat.postMessage` on first cap-hit per sender per hour
 (`SET NX` dedup). Unconnected → silent skip. Disconnect/reconnect without redeploy.
 
-## 5. API
+## 5. Features implemented (mapped to the spec)
+
+Backend — scheduler, persistence, rate limiting, concurrency:
+- ✅ Schedule API (`POST /api/campaigns/schedule`): staggered `scheduledAt`, bulk
+  insert, BullMQ delayed jobs (`jobId = email.id`), ES bulk index — **no cron anywhere**
+- ✅ Persistence: Redis AOF + boot reconciler (requeue `scheduled`, reset stale
+  `sending`); idempotent redelivery (`sent` = dup-ok, CAS claim, quota compensate)
+- ✅ Concurrency: `WORKER_CONCURRENCY` (5), parallel-safe via one Lua quota reservation + CAS row claim
+- ✅ Delay between sends: staggered start times + BullMQ `limiter {max:1, duration:MIN_GAP_MS}` (2s floor, Redis-backed)
+- ✅ Hourly caps: global + per-sender, env-configured, Redis counters; over-cap jobs delayed (never dropped), order best-effort
+- ✅ Slack alert on cap-hit: real OAuth + `chat.postMessage` once per sender/hour; silent skip when unconnected; disconnect/reconnect live
+- ✅ ES search with Postgres fallback (`source` labeled); live bull-board (`/admin/queues`) + native `/queues`
+- ✅ Star (`PATCH /:id/star`) + delete (`DELETE /:id` removes DB + job + ES doc)
+- ✅ Retry failed jobs; `POST /api/worker/tick` drives serverless sends
+
+Frontend — login, dashboard, compose, tables:
+- ✅ Google OAuth login (redirect + ticket) → dashboard; header name/email/avatar + logout; email/password + verification alongside
+- ✅ Dashboard: Scheduled / Sent tabs (Sent includes failed, per spec), Compose button, sidebar counts, Figma layout
+- ✅ Compose: subject/body (TipTap rich text), CSV/TXT upload with live detected-count, start time, delay, hourly limit → Schedule toast
+- ✅ Scheduled table (email/subject/time/status) + Sent table (email/subject/sent-time/sent-or-failed) with loading/empty/error states
+- ✅ Detail (formatted body, delivery + Ethereal preview), Queues (counts/tabs/retry), Settings (Slack, appearance, queue link), dark mode
+
+## 6. API
 
 `POST /api/auth/google`, `POST /api/auth/register`, `POST /api/auth/login`,
 `GET /api/auth/verify-email`, `POST /api/auth/resend-verification`,
 `GET /api/auth/me` · `POST /api/auth/logout` ·
 `GET|POST /api/senders` · `POST /api/campaigns/schedule` (20 batches/hr/IP; multipart `leads` csv/txt ≤5MB,
 ≤2000/batch local, ≤500 live; 400/409/413 mapped, never 500) → `{batchId,total,detected,firstAt,lastAt,estimatedHours,note}` ·
-`GET /api/emails?status&q&page` · `GET /api/emails/search` · `GET /api/emails/counts/summary` ·
-`GET /api/emails/:id` · Slack `connect/callback/status/disconnect` ·
+`GET /api/emails?status&q&page` (`status=sent` includes failed, per spec) · `GET /api/emails/search` · `GET /api/emails/counts/summary` ·
+`GET /api/emails/:id` · `PATCH /api/emails/:id/star` · `DELETE /api/emails/:id` · Slack `connect/callback/status/disconnect` ·
 `GET /api/health` · `GET /api/worker/status` · `GET /api/worker/jobs?state=&limit=` (scoped) ·
 `POST /api/worker/jobs/:id/retry` (failed only) · `POST /api/worker/tick` (needs `CRON_SECRET` when set).
 
-## 6. Frontend (`apps/web`, React+TS)
+## 7. Frontend (`apps/web`, React+TS)
 
 Routes `/login /verify-email /(?tab) /compose /queues /email/:id /settings` mirroring the 7 Figma shots:
 login card (Google redirect button + working email/password sign-in/sign-up with verification),
@@ -145,24 +174,25 @@ settings (Slack connect, appearance, queue link). `sonner` toasts, `cva` variant
 `react-hook-form`+zod compose, `react-query`+`axios(withCredentials)`, debounced search,
 skeletons/empty/error states, Tailwind `class` dark mode.
 
-## 7. Deploy live ($0)
+## 8. Deploy live ($0)
 
 - **Web:** Vercel project, `vercel.web.json` (Vite build). Env: `VITE_API_URL`, `VITE_GOOGLE_CLIENT_ID`.
 - **API:** Vercel project, `vercel.api.json` (serverless export `serverless.ts`).
   Env: Neon URL (pooler), Upstash TCP URL, `ES_NODE` (Bonsai or empty), OAuth/Slack,
   `FRONTEND_URL` (cookie `SameSite=None;Secure` in prod), `CRON_SECRET`.
 - **Waker (live only; repo contains zero cron schedules by spec):** external pinger —
-  cron-job.org @5min (free, recommended) or manual Actions run
-  (`.github/workflows/tick.yml`, `workflow_dispatch` only) → `POST {API}/api/worker/tick?limit=25`
-  with `Authorization: Bearer <CRON_SECRET>`. **Not Vercel Cron**: Hobby is daily-only (sub-daily fails deployment — verified).
-- Live limits: ~500/batch, 4MB uploads (Vercel 10s/4.5MB), ~5–10min timing granularity.
+  cron-job.org @5min (free, recommended) or a 5-minute poller hitting
+  `POST {API}/api/worker/tick?limit=25` with `Authorization: Bearer *** manual Actions run
+  (`.github/workflows/tick.yml`, `workflow_dispatch` only) also works.
+- **Not Vercel Cron**: Hobby is daily-only (sub-daily fails deployment — verified).
+- Live limits: ~500/batch, 4MB uploads (Vercel 10s/4.5MB), ~5min timing granularity.
 
-## 8. Assumptions, shortcuts, tradeoffs
+## 9. Assumptions, shortcuts, tradeoffs
 
 Assumptions: Figma screenshots are the spec (no live URL); email/password added alongside
 Google (spec's Google requirement kept); UTC hour buckets; Ethereal may dedupe rapid test
 accounts (verified — rows still distinct); at-least-once delivery; best-effort order;
-dev-bypass local-only; live tick granularity ~10min (external pinger, Hobby has no
+dev-bypass local-only; live tick granularity ~5min (external pinger, Hobby has no
 sub-daily cron); 500/batch + 4MB upload caps live.
 
 Tradeoffs: single queue `email-send` (colon illegal in
@@ -173,7 +203,8 @@ Vite SPA over Next (no SSR need, fewer Hobby invocations); Prisma (migration DX)
 external pinger over Vercel Cron (daily-only Hobby); ticket-based Google login (no
 cross-site cookie, console-independent).
 
-## 9. Submission
+## 10. Submission
 
 - Private GitHub repo + access for `Mitrajit`, `Yadav036` (owner action).
-- Demo video ≤5min — script in `docs/DEMO.md`.
+- Demo video ≤5min — script in `docs/DEMO.md`; recorded slice (login → compose →
+  queues → detail → settings, 20s) in `docs/demo-e2e-2026-09-28.webm`.
