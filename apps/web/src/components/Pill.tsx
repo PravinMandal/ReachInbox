@@ -1,8 +1,11 @@
 import { formatWhen } from "../lib/format.js";
 
-export function TimePill({ when }: { when: string }) {
+export function TimePill({ when, title }: { when: string; title?: string }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2.5 py-1 text-xs font-medium text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">
+    <span
+      className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2.5 py-1 text-xs font-medium text-orange-700 dark:bg-orange-900/30 dark:text-orange-300"
+      title={title}
+    >
       <span aria-hidden>◷</span> {formatWhen(when)}
     </span>
   );

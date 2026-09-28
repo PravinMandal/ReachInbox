@@ -14,7 +14,7 @@ export function EmailRow({ row, tab }: { row: EmailRow; tab: "scheduled" | "sent
       <span className="w-40 shrink-0 truncate text-sm font-medium">To: {row.to}</span>
       <span className="flex min-w-0 flex-1 items-center gap-2">
         {tab === "scheduled" ? (
-          <TimePill when={row.scheduledAt} />
+          <TimePill when={row.scheduledAt} title={row.error ?? undefined} />
         ) : row.status === "failed" ? (
           <StatusPill status="failed" />
         ) : (

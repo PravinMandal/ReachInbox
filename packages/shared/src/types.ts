@@ -25,6 +25,8 @@ export interface EmailRow {
   status: EmailStatus;
   previewUrl: string | null;
   starred: boolean;
+  /** Delay story for scheduled rows bumped by the hourly cap (null otherwise). */
+  error?: string | null;
 }
 
 export type SearchSource = "es" | "db" | "db-fallback";

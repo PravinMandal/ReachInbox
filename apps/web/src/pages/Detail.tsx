@@ -113,9 +113,14 @@ export function DetailPage() {
                   <dd><a className="text-green-600 underline" href={detail.data.email.previewUrl} target="_blank" rel="noreferrer">Open preview ↗</a></dd>
                 </>
               )}
-              {detail.data.email.error && (
+              {detail.data.email.error && detail.data.email.status !== "scheduled" && (
                 <>
                   <dt>Error</dt><dd className="text-red-600">{detail.data.email.error}</dd>
+                </>
+              )}
+              {detail.data.email.error && detail.data.email.status === "scheduled" && (
+                <>
+                  <dt>Delayed</dt><dd className="text-amber-600">{detail.data.email.error}</dd>
                 </>
               )}
             </dl>

@@ -80,6 +80,19 @@ export async function processOne(
     }).catch(() => undefined);
 
     if (opts.reschedule) await opts.reschedule(delayMs);
+    // Record WHY the pill moved: delay note survives on `error` (scheduled
+    // rows have no other message channel) so the UI can show "first due X,
+    // pushed to Y by hourly cap". Cleared on successful send below.
+    await prisma.email
+      .update({
+        where: { id: emailId },
+        data: {
+          error:
+            `Delayed by hourly cap ${batchCap}/hr — first due ` +
+            `${email.scheduledAt.toISOString()}, now fires ${new Date(Date.now() + delayMs).toISOString()}.`,
+        },
+      })
+      .catch(() => undefined);
     return { outcome: "delayed", delayMs };
   }
 
