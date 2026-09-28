@@ -32,10 +32,6 @@ export const emailQuerySchema = z.object({
 
 export type EmailQuery = z.infer<typeof emailQuerySchema>;
 
-export const googleLoginSchema = z.object({
-  idToken: z.string().min(10, "idToken required"),
-});
-
 export const registerSchema = z.object({
   name: z.string().trim().min(2, "Name is required").max(60),
   email: emailSchema,

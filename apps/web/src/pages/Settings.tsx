@@ -1,4 +1,5 @@
-import { Link } from "react-router-dom";
+import { useEffect } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "../lib/api.js";
@@ -13,6 +14,21 @@ export function SettingsPage() {
   const slack = useSlackStatus(Boolean(me.data));
   const { theme, toggle } = useTheme();
   const qc = useQueryClient();
+  const [params, setParams] = useSearchParams();
+
+  // Landing spot from the Slack OAuth callback (?slack=connected|error).
+  useEffect(() => {
+    const flag = params.get("slack");
+    if (flag === "connected") {
+      toast.success("Slack connected — rate-limit alerts on");
+      qc.invalidateQueries({ queryKey: ["slack"] });
+    } else if (flag === "error") {
+      toast.error("Slack connection failed — try again");
+    } else return;
+    const next = new URLSearchParams(params);
+    next.delete("slack");
+    setParams(next, { replace: true });
+  }, [params, setParams, qc]);
 
   const connect = useMutation({
     mutationFn: async (): Promise<{ url: string }> => (await api.get("/api/slack/connect")).data,

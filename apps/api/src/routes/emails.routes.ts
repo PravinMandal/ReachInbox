@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
+import { emailQuerySchema } from "@reachinbox/shared";
 import { prisma } from "../db.js";
 import { authMiddleware } from "../auth.js";
 import { searchEs } from "../es.js";
@@ -8,8 +9,6 @@ import { logger } from "../logger.js";
 
 export const emailsRouter = Router();
 emailsRouter.use(authMiddleware);
-
-const ALLOWED_SORT = new Set(["scheduledAt", "sentAt", "createdAt"]);
 
 interface FallbackRow {
   id: string;
@@ -80,13 +79,23 @@ async function searchFallback(
 async function listHandler(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const userId = req.userId!;
-    const status = req.query.status as string | undefined;
-    const q = (req.query.q as string | undefined)?.trim() ?? "";
-    const page = Math.max(1, Number(req.query.page ?? 1) || 1);
-    const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 20) || 20));
-    const sortRaw = String(req.query.sort ?? "scheduledAt");
-    const sort = ALLOWED_SORT.has(sortRaw) ? sortRaw : "scheduledAt";
-    const order = req.query.order === "asc" ? "asc" : "desc";
+    // Shared contract validation — rejects bad status/sort/etc with 400
+    // instead of letting Prisma throw a 500 (e.g. ?status=banana).
+    const parsed = emailQuerySchema.safeParse({
+      status: req.query.status,
+      q: typeof req.query.q === "string" ? req.query.q.trim() || undefined : undefined,
+      page: req.query.page,
+      limit: req.query.limit,
+      sort: req.query.sort,
+      order: req.query.order,
+    });
+    if (!parsed.success) {
+      res.status(400).json({
+        error: { code: "BAD_REQUEST", message: parsed.error.issues[0]?.message ?? "Invalid query" },
+      });
+      return;
+    }
+    const { status, q = "", page, limit, sort, order } = parsed.data;
 
     if (q) {
       try {

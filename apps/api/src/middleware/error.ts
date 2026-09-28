@@ -17,6 +17,11 @@ export function errorMiddleware(err: ApiError, _req: Request, res: Response, _ne
   } else if (multerCode === "LIMIT_FILE_COUNT" || multerCode === "LIMIT_UNEXPECTED_FILE") {
     err.status = 400;
     err.code = "BAD_FILE";
+  } else if (multerCode === "P2002") {
+    // Prisma unique violation (e.g. duplicate sender) — client error, not 500.
+    err.status = 409;
+    err.code = "CONFLICT";
+    err.message = "Already exists";
   }
   const status = err.status ?? 500;
   if (status >= 500) logger.error({ err }, "unhandled error");

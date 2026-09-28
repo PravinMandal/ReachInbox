@@ -2,7 +2,7 @@ import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import multer from "multer";
 import sanitizeHtml from "sanitize-html";
-import { extractEmails } from "@reachinbox/shared";
+import { extractEmails, scheduleCampaignSchema } from "@reachinbox/shared";
 import { prisma } from "../db.js";
 import { authMiddleware } from "../auth.js";
 import { emailQueue } from "../queue.js";
@@ -45,20 +45,39 @@ const MAX_VERCEL = 500;
 campaignsRouter.post("/schedule", scheduleLimiter, upload.single("leads"), async (req, res, next) => {
   try {
     const userId = req.userId!;
-    const subject = String(req.body.subject ?? "").trim();
-    const bodyRaw = String(req.body.body ?? "").trim();
-    const startAt = new Date(String(req.body.startAt ?? ""));
-    const delaySec = Math.max(0, Math.min(3600, Number(req.body.delaySec ?? 2) || 0));
-    const hourlyLimit = Math.max(
-      1,
-      Math.min(10_000, Number(req.body.hourlyLimit ?? env.MAX_EMAILS_PER_HOUR_GLOBAL) || 200),
-    );
+    const rawSenderId = String(req.body.senderId ?? "").trim();
+    const rawFrom = String(req.body.from ?? "").trim();
 
-    if (!subject) return res.status(400).json({ error: { code: "BAD_REQUEST", message: "Subject is required" } });
-    if (!bodyRaw) return res.status(400).json({ error: { code: "BAD_REQUEST", message: "Body is required" } });
-    if (Number.isNaN(startAt.getTime())) {
-      return res.status(400).json({ error: { code: "BAD_REQUEST", message: "startAt must be ISO datetime" } });
+    // Collect recipients FIRST (file + explicit), then validate everything —
+    // including the recipient list — against the shared contract.
+    const explicit: string[] = [];
+    if (req.body.to) {
+      try {
+        const arr = typeof req.body.to === "string" ? JSON.parse(req.body.to) : req.body.to;
+        if (Array.isArray(arr)) explicit.push(...arr.map((s) => String(s)));
+      } catch {
+        explicit.push(...String(req.body.to).split(/[,;\s]+/));
+      }
     }
+    const fileText = req.file?.buffer?.toString("utf8") ?? "";
+    const recipients = [...new Set([...extractEmails(explicit.join("\n")), ...extractEmails(fileText)])];
+
+    const parsed = scheduleCampaignSchema.safeParse({
+      subject: req.body.subject ?? "",
+      body: req.body.body ?? "",
+      senderId: rawSenderId || undefined,
+      from: rawFrom || undefined,
+      startAt: req.body.startAt ?? "",
+      delaySec: req.body.delaySec ?? 2,
+      hourlyLimit: req.body.hourlyLimit ?? env.MAX_EMAILS_PER_HOUR_GLOBAL,
+      to: recipients,
+    });
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: { code: "BAD_REQUEST", message: parsed.error.issues[0]?.message ?? "Invalid input" },
+      });
+    }
+    const { subject, body: bodyRaw, startAt, delaySec, hourlyLimit } = parsed.data;
 
     let sender = null;
     if (req.body.senderId) sender = await prisma.sender.findFirst({ where: { id: String(req.body.senderId), userId } });
@@ -90,23 +109,12 @@ campaignsRouter.post("/schedule", scheduleLimiter, upload.single("leads"), async
       transformTags: { a: sanitizeHtml.simpleTransform("a", { rel: "noopener", target: "_blank" }) },
     });
 
-    const explicit: string[] = [];
-    if (req.body.to) {
-      try {
-        const arr = typeof req.body.to === "string" ? JSON.parse(req.body.to) : req.body.to;
-        if (Array.isArray(arr)) explicit.push(...arr.map((s) => String(s)));
-      } catch {
-        explicit.push(...String(req.body.to).split(/[,;\s]+/));
-      }
-    }
-    const fileText = req.file?.buffer?.toString("utf8") ?? "";
-    const recipients = [...new Set([...extractEmails(explicit.join("\n")), ...extractEmails(fileText)])];
-
     if (recipients.length === 0) {
       return res.status(400).json({
         error: { code: "NO_RECIPIENTS", message: "No valid email addresses detected. Upload a CSV/TXT or add To addresses." },
       });
     }
+    // NOTE: schema caps `to` at 2000; the live cap is stricter (function timeouts).
     const cap = isVercel ? MAX_VERCEL : MAX_LOCAL;
     if (recipients.length > cap) {
       return res.status(400).json({

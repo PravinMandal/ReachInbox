@@ -47,7 +47,25 @@ export async function ensureIndex(attempts = 6): Promise<void> {
     try {
       const es = esClient();
       const exists = await es.indices.exists({ index: ES_INDEX });
-      if (exists) return;
+      if (exists) {
+        // Guard against the classic failure: index auto-created by a bulk write
+        // while ES was up but our mapping wasn't applied (userId as `text`
+        // silently breaks every term query). Detect + shout; repair via reindex
+        // after deleting the index.
+        try {
+          const mapping = await es.indices.getMapping({ index: ES_INDEX });
+          const props = (mapping[ES_INDEX] as { mappings?: { properties?: Record<string, { type?: string }> } })
+            ?.mappings?.properties;
+          if (props && props.userId?.type !== "keyword") {
+            logger.error(
+              "ES emails index has wrong mapping (userId is not keyword) — search is degraded; delete the index and restart to recreate, then run reindex",
+            );
+          }
+        } catch {
+          // mapping check itself is best-effort
+        }
+        return;
+      }
       await es.indices.create({
         index: ES_INDEX,
         mappings: {

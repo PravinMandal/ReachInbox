@@ -5,12 +5,12 @@ import { logger } from "./logger.js";
 import { redis } from "./redis.js";
 import { secsUntilHourEnd, slackNotifiedKey } from "./time.js";
 
-export function slackAuthorizeUrl(userId: string): string {
+export function slackAuthorizeUrl(state: string): string {
   const params = new URLSearchParams({
     client_id: env.SLACK_CLIENT_ID,
     scope: "chat:write,chat:write.public",
     redirect_uri: env.SLACK_REDIRECT_URI,
-    state: userId,
+    state,
   });
   return `https://slack.com/oauth/v2/authorize?${params.toString()}`;
 }

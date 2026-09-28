@@ -45,8 +45,15 @@ export async function tryReserveQuota(
 
 /** Return a slot after a lost CAS race — the reservation is no longer needed. */
 export async function compensateQuota(globalKey: string, senderKey: string): Promise<void> {
-  const pipe = redis.pipeline();
-  pipe.decr(globalKey);
-  pipe.decr(senderKey);
-  await pipe.exec();
+  // Best-effort: if Redis is flaking, the alternative (throwing into the job)
+  // would retry into another compensate and drive the counter negative.
+  // Worst case of a missed compensate is one leaked slot for <1h (fail-closed).
+  try {
+    const pipe = redis.pipeline();
+    pipe.decr(globalKey);
+    pipe.decr(senderKey);
+    await pipe.exec();
+  } catch {
+    // ignored — see above
+  }
 }

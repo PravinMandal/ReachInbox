@@ -154,6 +154,12 @@ export async function processJob(job: Job<SendJobData>, token?: string): Promise
     index,
     gapMs,
     reschedule: async (delayMs: number) => {
+      // Persist the new fire time FIRST so DB truth survives even if Redis is
+      // lost before the job fires (same as the tick path — one behavior).
+      await prisma.email.update({
+        where: { id: emailId },
+        data: { scheduledAt: new Date(Date.now() + delayMs) },
+      });
       // Token-scoped delay: without it BullMQ throws `Missing lock`.
       // DelayedError (not a plain Error) tells BullMQ this is a reschedule,
       // not a failure — attempts are preserved.
