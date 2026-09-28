@@ -27,7 +27,10 @@ const formSchema = z.object({
 type FormValues = z.infer<typeof formSchema>;
 
 function defaultStartAt(): string {
-  return new Date(Date.now() + 60_000).toISOString().slice(0, 16);
+  // Immediate-ish default: truncated to the minute, the server clamps to now
+  // (Math.max) so the first email sends within seconds — a reviewer never
+  // waits. Push it out with Send Later for a real future start.
+  return new Date().toISOString().slice(0, 16);
 }
 
 export function ComposePage() {
