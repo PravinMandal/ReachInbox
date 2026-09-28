@@ -148,9 +148,10 @@ skeletons/empty/error states, Tailwind `class` dark mode.
 - **API:** Vercel project, `vercel.api.json` (serverless export `serverless.ts`).
   Env: Neon URL (pooler), Upstash TCP URL, `ES_NODE` (Bonsai or empty), OAuth/Slack,
   `FRONTEND_URL` (cookie `SameSite=None;Secure` in prod), `CRON_SECRET`.
-- **Waker:** `.github/workflows/tick.yml` (GHA `*/10`, ~860 min/mo of the free
-  2000-min budget) or cron-job.org @1min → `POST {API}/api/worker/tick?limit=25`.
-  **Not Vercel Cron**: Hobby is daily-only (sub-daily fails deployment — verified).
+- **Waker (live only; repo contains zero cron schedules by spec):** external pinger —
+  cron-job.org @5min (free, recommended) or manual Actions run
+  (`.github/workflows/tick.yml`, `workflow_dispatch` only) → `POST {API}/api/worker/tick?limit=25`
+  with `Authorization: Bearer <CRON_SECRET>`. **Not Vercel Cron**: Hobby is daily-only (sub-daily fails deployment — verified).
 - Live limits: ~500/batch, 4MB uploads (Vercel 10s/4.5MB), ~5–10min timing granularity.
 
 ## 8. Assumptions, shortcuts, tradeoffs
