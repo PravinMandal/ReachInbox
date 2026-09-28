@@ -195,7 +195,7 @@ skeletons/empty/error states, Tailwind `class` dark mode.
 Assumptions: Figma screenshots are the spec (no live URL); email/password added alongside
 Google (spec's Google requirement kept); UTC hour buckets; Ethereal may dedupe rapid test
 accounts (verified — rows still distinct); at-least-once delivery; best-effort order;
-dev-bypass local-only; live tick granularity ~5min (external pinger, Hobby has no
+dev-bypass local-only; live tick granularity ~1min (external pinger, Hobby has no
 sub-daily cron); 500/batch + 4MB upload caps live.
 
 Tradeoffs: single queue `email-send` (colon illegal in
