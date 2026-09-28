@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -19,10 +19,15 @@ function Guard({ children }: { children: JSX.Element }) {
   const redeemed = useRef(false);
   // Google ticket lands here without a session yet — redeem BEFORE the auth
   // decision, or Guard would bounce to /login and eat the ticket.
+  // `redeeming` holds the redirect until the POST settles: without it, a cold
+  // return from Google (me errors, no cookie yet) bounces to /login mid-flight
+  // and strands the user there despite the session landing a moment later.
+  const [redeeming, setRedeeming] = useState(Boolean(params.get("ticket")));
   useEffect(() => {
     const ticket = params.get("ticket");
     if (ticket && !redeemed.current) {
       redeemed.current = true;
+      setRedeeming(true);
       api
         .post("/api/auth/google/consume", { ticket })
         .then(() => {
@@ -34,10 +39,11 @@ function Guard({ children }: { children: JSX.Element }) {
           const next = new URLSearchParams(params);
           next.delete("ticket");
           setParams(next, { replace: true });
+          setRedeeming(false);
         });
     }
   }, [params, setParams, qc]);
-  if (me.isLoading) return <div className="p-10">Loading…</div>;
+  if (me.isLoading || redeeming) return <div className="p-10">Loading…</div>;
   if (me.isError || !me.data?.user) return <Navigate to="/login" replace />;
   return children;
 }

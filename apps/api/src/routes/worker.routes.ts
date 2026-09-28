@@ -24,7 +24,9 @@ workerRouter.get("/status", authMiddleware, async (req, res, next) => {
       prisma.email.count({ where: { userId, status: "sending" } }),
       prisma.email.count({ where: { userId, status: "sent" } }),
       prisma.email.count({ where: { userId, status: "failed" } }),
-      prisma.email.count({ where: { status: "scheduled", scheduledAt: { lte: now } } }),
+      // Scoped like every other count: a caller must never see other
+      // tenants' backlog size in their own dashboard numbers.
+      prisma.email.count({ where: { userId, status: "scheduled", scheduledAt: { lte: now } } }),
     ]);
     res.json({ waiting, delayed, active, completed, failed, due, now: now.toISOString() });
   } catch (err) {
