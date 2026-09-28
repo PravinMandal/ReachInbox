@@ -107,6 +107,16 @@ export async function indexEmail(doc: EsEmailDoc): Promise<void> {
   }
 }
 
+/** Remove one doc (email deleted). Never throws. */
+export async function removeEmail(id: string): Promise<void> {
+  if (!esConfigured()) return;
+  try {
+    await esClient().delete({ index: ES_INDEX, id });
+  } catch (err) {
+    logger.warn({ err, id }, "ES delete failed (non-fatal)");
+  }
+}
+
 export async function indexMany(docs: EsEmailDoc[]): Promise<void> {
   if (docs.length === 0 || !esConfigured()) return;
   try {
@@ -120,14 +130,18 @@ export async function indexMany(docs: EsEmailDoc[]): Promise<void> {
 export interface EsSearchParams {
   userId: string;
   q: string;
-  status?: string;
+  status?: string | string[];
   from: number;
   size: number;
 }
 
 export async function searchEs(params: EsSearchParams): Promise<{ ids: string[]; total: number }> {
   const must: Array<Record<string, unknown>> = [{ term: { userId: params.userId } }];
-  if (params.status) must.push({ term: { status: params.status } });
+  if (params.status) {
+    must.push(
+      Array.isArray(params.status) ? { terms: { status: params.status } } : { term: { status: params.status } },
+    );
+  }
   const res = await esClient().search({
     index: ES_INDEX,
     from: params.from,

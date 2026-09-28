@@ -73,6 +73,7 @@ model Email {
   messageId   String?
   previewUrl  String?
   error       String?     @db.Text
+  starred     Boolean     @default(false)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 

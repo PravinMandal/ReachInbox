@@ -1,16 +1,34 @@
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { toast } from "sonner";
 import { Avatar } from "../components/Avatar.js";
 import { AppShell } from "../components/Sidebar.js";
-import { useAuth, useCounts, useEmailDetail } from "../hooks/queries.js";
+import { useAuth, useCounts, useDeleteEmail, useEmailDetail, useStarEmail } from "../hooks/queries.js";
 import { formatFull } from "../lib/format.js";
+import { cn } from "../lib/cn.js";
 
 export function DetailPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const me = useAuth();
   const counts = useCounts(Boolean(me.data));
   const detail = useEmailDetail(id);
+  const star = useStarEmail();
+  const del = useDeleteEmail();
 
   if (!me.data) return null;
+
+  const email = detail.data?.email;
+  const onDelete = () => {
+    if (!id) return;
+    if (!window.confirm(`Delete this ${email?.status ?? ""} email? A scheduled email will never send.`)) return;
+    del.mutate(id, {
+      onSuccess: () => {
+        toast.success("Email deleted");
+        navigate("/");
+      },
+      onError: (e: Error) => toast.error(e.message),
+    });
+  };
 
   return (
     <AppShell user={me.data.user} counts={counts.data}>
@@ -18,8 +36,35 @@ export function DetailPage() {
       <div className="mb-6 flex items-center gap-3">
         <Link to="/" className="text-xl" aria-label="Back">←</Link>
         <h1 className="truncate text-xl">{detail.data?.email.subject ?? "Email"}</h1>
-        <div className="ml-auto flex items-center gap-3 text-neutral-400">
-          <span>☆</span><span>🗑</span>
+        <div className="ml-auto flex items-center gap-3">
+          {email && (
+            <>
+              <button
+                type="button"
+                title={email.starred ? "Unstar" : "Star"}
+                aria-label={email.starred ? "Unstar" : "Star"}
+                aria-pressed={email.starred}
+                disabled={star.isPending}
+                onClick={() => star.mutate({ id: email.id, starred: !email.starred })}
+                className={cn(
+                  "text-xl leading-none",
+                  email.starred ? "text-yellow-500" : "text-neutral-400 hover:text-yellow-400",
+                )}
+              >
+                {email.starred ? "★" : "☆"}
+              </button>
+              <button
+                type="button"
+                title="Delete"
+                aria-label="Delete"
+                disabled={del.isPending}
+                onClick={onDelete}
+                className="text-xl leading-none text-neutral-400 hover:text-red-600 disabled:opacity-40"
+              >
+                🗑
+              </button>
+            </>
+          )}
           {me.data && <Avatar name={me.data.user.name} src={me.data.user.avatar} size={32} />}
         </div>
       </div>

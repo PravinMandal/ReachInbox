@@ -24,6 +24,7 @@ export interface EmailRow {
   sentAt: string | null;
   status: EmailStatus;
   previewUrl: string | null;
+  starred: boolean;
 }
 
 export type SearchSource = "es" | "db" | "db-fallback";

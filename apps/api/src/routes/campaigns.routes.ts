@@ -24,7 +24,9 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: (isVercel ? 4 : 5) * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, cb) => {
-    if (/\.csv$/i.test(file.originalname) || /\.txt$/i.test(file.originalname) || /csv|plain|text|octet/.test(file.mimetype)) {
+    // Extension decides: octet-stream (curl, some browsers) would otherwise
+    // let any renamed binary through. MIME is only a secondary hint.
+    if (/\.(csv|txt)$/i.test(file.originalname)) {
       cb(null, true);
     } else {
       cb(Object.assign(new Error("Only .csv / .txt lead files are accepted"), { status: 400, code: "BAD_FILE" }));

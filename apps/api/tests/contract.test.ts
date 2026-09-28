@@ -95,6 +95,18 @@ describe("api contract", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects non-csv/txt lead files with BAD_FILE", async () => {
+    const res = await request(app)
+      .post("/api/campaigns/schedule")
+      .set("Cookie", cookie)
+      .field("subject", "s")
+      .field("body", "b")
+      .field("startAt", new Date().toISOString())
+      .attach("leads", Buffer.from("MZ-binary"), { filename: "evil.exe", contentType: "application/octet-stream" });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("BAD_FILE");
+  });
+
   it("rejects bad ticket + unknown job retry", async () => {
     const t = await request(app).post("/api/auth/google/consume").send({ ticket: "junk" });
     expect(t.status).toBe(401);
@@ -102,9 +114,87 @@ describe("api contract", () => {
     expect(r.status).toBe(404);
   });
 
+  it("stars and deletes emails", async () => {
+    // Contract user has no Ethereal sender (login seeds it async) — use a
+    // direct fake-SMTP sender; the email is scheduled far-future + deleted,
+    // so nothing ever sends.
+    const snd = await request(app)
+      .post("/api/senders")
+      .set("Cookie", cookie)
+      .send({ fromEmail: `contract-sender-${stamp}@ex.io`, smtpUser: "u", smtpPass: "p" });
+    expect(snd.status).toBe(201);
+
+    const startAt = new Date(Date.now() + 3600_000).toISOString();
+    const sch = await request(app)
+      .post("/api/campaigns/schedule")
+      .set("Cookie", cookie)
+      .field("subject", "star target")
+      .field("body", "star body")
+      .field("startAt", startAt)
+      .field("to", JSON.stringify([`star-${stamp}@ex.io`]));
+    expect(sch.status).toBe(201);
+
+    const listed = await request(app).get("/api/emails?status=scheduled&limit=50").set("Cookie", cookie);
+    const row = listed.body.data.find((e: { to: string }) => e.to === `star-${stamp}@ex.io`);
+    expect(row).toBeTruthy();
+    expect(row.starred).toBe(false);
+    const id = row.id as string;
+
+    const noauth = await request(app).patch(`/api/emails/${id}/star`).send({ starred: true });
+    expect(noauth.status).toBe(401);
+
+    const bad = await request(app).patch(`/api/emails/${id}/star`).set("Cookie", cookie).send({ starred: "yes" });
+    expect(bad.status).toBe(400);
+
+    const miss = await request(app).patch("/api/emails/doesnotexist").set("Cookie", cookie).send({ starred: true });
+    expect(miss.status).toBe(404);
+
+    const star = await request(app).patch(`/api/emails/${id}/star`).set("Cookie", cookie).send({ starred: true });
+    expect(star.status).toBe(200);
+    expect(star.body).toEqual({ id, starred: true });
+
+    const got = await request(app).get(`/api/emails/${id}`).set("Cookie", cookie);
+    expect(got.body.email.starred).toBe(true);
+
+    const delMissing = await request(app).delete("/api/emails/doesnotexist").set("Cookie", cookie);
+    expect(delMissing.status).toBe(404);
+
+    const del = await request(app).delete(`/api/emails/${id}`).set("Cookie", cookie);
+    expect(del.status).toBe(204);
+
+    const gone = await request(app).get(`/api/emails/${id}`).set("Cookie", cookie);
+    expect(gone.status).toBe(404);
+  });
+
   it("404s unknown api routes as JSON", async () => {
     const res = await request(app).get("/api/nope");
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe("NOT_FOUND");
+  });
+
+  it("sent tab includes failed rows (spec: sent / failed)", async () => {
+    const snd = await prisma.sender.findFirst({ where: { user: { email } }, orderBy: { createdAt: "asc" } });
+    expect(snd).toBeTruthy();
+    const user = await prisma.user.findUniqueOrThrow({ where: { email } });
+    const batch = await prisma.batch.create({
+      data: {
+        userId: user.id, senderId: snd!.id, subject: "f", body: "b",
+        startAt: new Date(), delaySec: 1, hourlyLimit: 200, total: 1,
+      },
+    });
+    const failed = await prisma.email.create({
+      data: {
+        batchId: batch.id, userId: user.id, senderId: snd!.id,
+        to: `failed-${stamp}@ex.io`, subject: "f", body: "b",
+        scheduledAt: new Date(), status: "failed", error: "boom",
+      },
+    });
+    const sent = await request(app).get("/api/emails?status=sent&limit=50").set("Cookie", cookie);
+    expect(sent.body.data.map((e: { id: string }) => e.id)).toContain(failed.id);
+    const summary = await request(app).get("/api/emails/counts/summary").set("Cookie", cookie);
+    expect(summary.body.sent).toBeGreaterThanOrEqual(1);
+    expect(summary.body.failed).toBeGreaterThanOrEqual(1);
+    await prisma.email.delete({ where: { id: failed.id } });
+    await prisma.batch.delete({ where: { id: batch.id } });
   });
 });

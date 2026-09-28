@@ -1,8 +1,11 @@
 import { Link } from "react-router-dom";
 import type { EmailRow } from "@reachinbox/shared";
-import { SentPill, TimePill } from "./Pill.js";
+import { SentPill, StatusPill, TimePill } from "./Pill.js";
+import { useStarEmail } from "../hooks/queries.js";
+import { cn } from "../lib/cn.js";
 
 export function EmailRow({ row, tab }: { row: EmailRow; tab: "scheduled" | "sent" }) {
+  const star = useStarEmail();
   return (
     <Link
       to={`/email/${row.id}`}
@@ -10,14 +13,34 @@ export function EmailRow({ row, tab }: { row: EmailRow; tab: "scheduled" | "sent
     >
       <span className="w-40 shrink-0 truncate text-sm font-medium">To: {row.to}</span>
       <span className="flex min-w-0 flex-1 items-center gap-2">
-        {tab === "scheduled" ? <TimePill when={row.scheduledAt} /> : <SentPill />}
+        {tab === "scheduled" ? (
+          <TimePill when={row.scheduledAt} />
+        ) : row.status === "failed" ? (
+          <StatusPill status="failed" />
+        ) : (
+          <SentPill />
+        )}
         <span className="truncate text-sm">
           <span className="font-medium">{row.subject}</span>
         </span>
       </span>
-      <span className="text-neutral-300 dark:text-neutral-600" aria-hidden>
-        ☆
-      </span>
+      <button
+        type="button"
+        title={row.starred ? "Unstar" : "Star"}
+        aria-label={row.starred ? "Unstar" : "Star"}
+        aria-pressed={row.starred}
+        disabled={star.isPending}
+        onClick={(e) => {
+          e.preventDefault();
+          star.mutate({ id: row.id, starred: !row.starred });
+        }}
+        className={cn(
+          "shrink-0 text-lg leading-none",
+          row.starred ? "text-yellow-500" : "text-neutral-300 hover:text-yellow-400 dark:text-neutral-600",
+        )}
+      >
+        {row.starred ? "★" : "☆"}
+      </button>
     </Link>
   );
 }

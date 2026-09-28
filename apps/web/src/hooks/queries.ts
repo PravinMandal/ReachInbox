@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api.js";
 import type { CountsSummary, EmailDetail, PagedEmails, Sender, User } from "@reachinbox/shared";
 
@@ -58,5 +58,31 @@ export function useSlackStatus(enabled: boolean) {
     queryFn: async (): Promise<{ connected: boolean; channelId: string | null }> =>
       (await api.get("/api/slack/status")).data,
     enabled,
+  });
+}
+
+export function useStarEmail() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, starred }: { id: string; starred: boolean }) =>
+      (await api.patch(`/api/emails/${id}/star`, { starred })).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["emails"] });
+      qc.invalidateQueries({ queryKey: ["email"] });
+    },
+  });
+}
+
+export function useDeleteEmail() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => api.delete(`/api/emails/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["emails"] });
+      qc.invalidateQueries({ queryKey: ["email"] });
+      qc.invalidateQueries({ queryKey: ["counts"] });
+      qc.invalidateQueries({ queryKey: ["queue-jobs"] });
+      qc.invalidateQueries({ queryKey: ["queue-status"] });
+    },
   });
 }
