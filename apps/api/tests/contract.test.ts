@@ -20,6 +20,9 @@ describe("api contract", () => {
   });
 
   afterAll(async () => {
+    // Order matters: Email.senderId is RESTRICT — delete leaves before roots.
+    await prisma.email.deleteMany({ where: { batch: { user: { email: { startsWith: "contract-" } } } } });
+    await prisma.batch.deleteMany({ where: { user: { email: { startsWith: "contract-" } } } });
     await prisma.user.deleteMany({ where: { email: { startsWith: "contract-" } } });
     await prisma.$disconnect();
   });
@@ -164,7 +167,7 @@ describe("api contract", () => {
 
     const gone = await request(app).get(`/api/emails/${id}`).set("Cookie", cookie);
     expect(gone.status).toBe(404);
-  });
+  }, 30_000); // real infra + slow local disk: same reason the register test gets 60s
 
   it("404s unknown api routes as JSON", async () => {
     const res = await request(app).get("/api/nope");
@@ -196,5 +199,5 @@ describe("api contract", () => {
     expect(summary.body.failed).toBeGreaterThanOrEqual(1);
     await prisma.email.delete({ where: { id: failed.id } });
     await prisma.batch.delete({ where: { id: batch.id } });
-  });
+  }, 30_000);
 });
