@@ -80,7 +80,10 @@ export async function ensureEtherealPool(userId: string, fromEmail: string): Pro
       await prisma.sender.create({
         data: {
           userId,
-          fromEmail: i === 0 ? fromEmail : `sender${existing + i}@${domain}`,
+          // Extra pool addresses must read as test aliases of the user's own
+          // identity — never as a second real account. `sender1@gmail.com`
+          // style fabrications mislead the demo (and the From dropdown).
+          fromEmail: i === 0 ? fromEmail : `${fromEmail.split("@")[0]}+sender${existing + i}@${domain}`,
           smtpUser: account.user,
           smtpPass: encryptSecret(account.pass),
         },
