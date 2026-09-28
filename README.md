@@ -49,6 +49,9 @@ without Google creds. Real login needs `GOOGLE_CLIENT_ID` + `VITE_GOOGLE_CLIENT_
 | Unit tests (`vitest`) | ✅ shared + api pass; `tsc` clean ×3, `vite build` ok |
 | HTTP contract (`supertest`) | ✅ health/validation/authz matrix, no infra mocks |
 | Failed → retry → sent | ✅ 535-auth fail, retry re-attempts, creds restored → sent + preview |
+| Star / delete | ✅ row + detail star toggle persists; delete removes DB + BullMQ job + ES doc, scheduled deletes never fire |
+| Sent tab incl. failed (spec) | ✅ `status=sent` returns sent+failed; counts match; Failed pill in Sent tab |
+| Lead-file filter | ✅ `.exe`/octet-stream → `BAD_FILE` 400; >5MB → 413; contract-tested |
 | Google ticket login | ✅ mint→consume→cookie, replay/garbage 401, SPA redeems pre-Guard |
 | Load: 1000 schedule | ✅ 0.56s, estimatedHours=5, orphans cleaned from queue + ES |
 
