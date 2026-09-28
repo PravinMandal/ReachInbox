@@ -182,16 +182,27 @@ campaignsRouter.post("/schedule", scheduleLimiter, upload.single("leads"), async
     const estimatedHours = Math.max(1, Math.ceil(persisted.length / effectiveCap));
 
     // Serverless has no persistent worker: without this, a just-scheduled
-    // email waits for the next external tick (up to minutes). Drain a few due
-    // rows inline so small batches send before the response returns.
-    // Capped at 3 (Ethereal ~1-3s each) to stay inside Hobby function limits;
-    // the waker picks up the rest. Local Docker has a real worker — skip.
-    // Never fails the schedule response.
+    // email waits for the next external tick (up to a minute). Drain the first
+    // few rows inline so small batches send before the response returns —
+    // including staggered ones (a second pass after a short wait catches rows
+    // due within seconds, preserving the user's delay). Capped so the request
+    // stays inside Hobby function limits; the waker picks up the rest. Local
+    // Docker has a real worker — skip. Never fails the schedule response.
     let instantSent = 0;
     if (isVercel && persisted.length > 0) {
       try {
-        const tick = await runTick(Math.min(3, persisted.length));
-        instantSent = tick.sent;
+        const want = Math.min(3, persisted.length);
+        const t0 = Date.now();
+        const first = await runTick(want);
+        instantSent += first.sent;
+        // Second pass only while the response still has headroom (Hobby 10s).
+        if (instantSent < want && Date.now() - t0 < 5000) {
+          const soon = persisted.slice(0, want).map((e) => e.scheduledAt.getTime());
+          const waitMs = Math.min(3500, Math.max(0, Math.min(...soon) - Date.now()));
+          if (waitMs > 300) await new Promise((r) => setTimeout(r, waitMs));
+          const second = await runTick(want - instantSent);
+          instantSent += second.sent;
+        }
       } catch (e) {
         logger.warn({ e }, "inline drain failed (non-fatal) — waker covers it");
       }
