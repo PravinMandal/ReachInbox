@@ -15,8 +15,6 @@ export function DetailPage() {
   const star = useStarEmail();
   const del = useDeleteEmail();
 
-  if (!me.data) return null;
-
   const email = detail.data?.email;
   const onDelete = () => {
     if (!id) return;
@@ -29,6 +27,17 @@ export function DetailPage() {
       onError: (e: Error) => toast.error(e.message),
     });
   };
+
+  // Auth states mirror Inbox: spinner while loading, login link on dead
+  // session — never a blank page (e.g. expired session on a bookmarked URL).
+  if (me.isLoading) return <div className="p-10">Loading…</div>;
+  if (me.isError || !me.data) {
+    return (
+      <div className="p-10">
+        Login required. <a className="underline" href="/login">Go to login</a>
+      </div>
+    );
+  }
 
   return (
     <AppShell user={me.data.user} counts={counts.data}>

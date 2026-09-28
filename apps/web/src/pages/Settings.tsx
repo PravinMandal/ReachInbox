@@ -46,7 +46,14 @@ export function SettingsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  if (!me.data) return null;
+  if (me.isLoading) return <div className="p-10">Loading…</div>;
+  if (me.isError || !me.data) {
+    return (
+      <div className="p-10">
+        Login required. <a className="underline" href="/login">Go to login</a>
+      </div>
+    );
+  }
 
   return (
     <AppShell user={me.data.user} counts={counts.data}>
