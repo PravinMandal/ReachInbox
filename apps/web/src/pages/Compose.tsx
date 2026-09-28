@@ -26,11 +26,22 @@ const formSchema = z.object({
 
 type FormValues = z.infer<typeof formSchema>;
 
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** Local `datetime-local` value (NOT UTC): the picker shows exactly this. */
+export function toLocalInputValue(d: Date): string {
+  return (
+    `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` +
+    `T${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+  );
+}
+
 function defaultStartAt(): string {
-  // Immediate-ish default: truncated to the minute, the server clamps to now
-  // (Math.max) so the first email sends within seconds — a reviewer never
-  // waits. Push it out with Send Later for a real future start.
-  return new Date().toISOString().slice(0, 16);
+  // Immediate-ish default in LOCAL time — toISOString() is UTC and showed an
+  // IST user a clock 5:30 in the past, inviting a "corrected" future start.
+  return toLocalInputValue(new Date());
 }
 
 export function ComposePage() {
@@ -65,9 +76,11 @@ export function ComposePage() {
   const toText = watch("toText");
   const startAt = watch("startAt");
   const bodyHtml = watch("body");
+  const hourlyLimit = watch("hourlyLimit");
   const recipients = extractEmails(toText);
   const chips = recipients.slice(0, 3);
   const extra = recipients.length - chips.length;
+  const totalRecipients = recipients.length + fileCount;
 
   const pickFile = async (f: File | null) => {
     setFile(f);
@@ -112,11 +125,7 @@ export function ComposePage() {
     const d = new Date();
     d.setDate(d.getDate() + 1);
     d.setHours(h, 0, 0, 0);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    setValue(
-      "startAt",
-      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`,
-    );
+    setValue("startAt", toLocalInputValue(d));
   };
 
   if (!me.data) return null;
@@ -224,6 +233,12 @@ export function ComposePage() {
           {(errors.delaySec || errors.hourlyLimit) && (
             <p className="w-full text-xs text-red-600">
               {errors.delaySec?.message ?? errors.hourlyLimit?.message}
+            </p>
+          )}
+          {totalRecipients > 0 && Number(hourlyLimit) > 0 && Number(hourlyLimit) < totalRecipients && (
+            <p className="w-full text-xs text-amber-600">
+              ⚠ Hourly limit ({hourlyLimit}/hr) is lower than {totalRecipients} recipients —
+              the rest will wait for later hours. Raise the limit to send all at once.
             </p>
           )}
         </div>
