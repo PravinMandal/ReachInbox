@@ -37,11 +37,12 @@ slackRouter.get("/callback", async (req, res) => {
     if (!code || !state) return done("error");
     let userId: string;
     try {
-      // Accept signed state; fall back to raw userId for old in-flight connects.
+      // Signed state only. An older build briefly accepted a raw userId here;
+      // that lets anyone bind their Slack token to someone else's account
+      // (user IDs are not secret), so unsigned states are rejected outright.
       userId = verifySlackState(state);
     } catch {
-      if (!/^[\w-]{1,64}$/.test(state)) return done("error");
-      userId = state;
+      return done("error");
     }
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
     if (!user) return done("error");
