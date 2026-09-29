@@ -7,6 +7,7 @@ import { z } from "zod";
 import { toast } from "sonner";
 import { passwordLoginSchema, registerSchema } from "@reachinbox/shared";
 import { api } from "../lib/api.js";
+import { useAuth } from "../hooks/queries.js";
 import { Input } from "../components/Input.js";
 import { Logo } from "../components/Logo.js";
 
@@ -163,6 +164,15 @@ function LoginCard() {
   const [mode, setMode] = useState<Mode>("signin");
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
   const [search, setSearch] = useSearchParams();
+  const navigate = useNavigate();
+  const me = useAuth();
+
+  // Already signed in (session landed via Google ticket, verify link, or a
+  // second tab) but sitting on /login: go to the dashboard instead of
+  // waiting for a manual back/refresh.
+  useEffect(() => {
+    if (me.data?.user) navigate("/", { replace: true });
+  }, [me.data, navigate]);
 
   useEffect(() => {
     if (search.get("error") === "google_failed") {
